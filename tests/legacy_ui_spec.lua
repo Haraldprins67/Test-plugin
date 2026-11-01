@@ -264,6 +264,7 @@ assert(loadfile("ClassicLootLog/Tracking.lua"))()
 assert(loadfile("ClassicLootLog/Value.lua"))()
 assert(loadfile("ClassicLootLog/GroupLoot.lua"))()
 assert(loadfile("ClassicLootLog/GroupEvents.lua"))()
+assert(loadfile("ClassicLootLog/LootReceipts.lua"))()
 assert(loadfile("ClassicLootLog/Finance.lua"))()
 assert(loadfile("ClassicLootLog/Money.lua"))()
 assert(loadfile("ClassicLootLog/Merchant.lua"))()
@@ -842,6 +843,221 @@ test("Vanilla timer off command updates all tabs and the mini display while main
         SlashCmdList.CLASSICLOOTLOG("timer off")
         equal(ns.Core.TimerElapsed(ClassicLootLogDB, clock), 4)
     end
+end)
+
+local function receiptLink(id, name, color)
+    return "|c" .. (color or "ff1eff00") .. "|Hitem:" .. id .. ":0:0:0|h[" .. name .. "]|h|r"
+end
+
+local function receivedQuantity(id, origin)
+    local total = 0
+    for _, entry in ipairs(ClassicLootLogDB.entries) do
+        if ns.Core.ItemKey(entry.link) == "item:" .. id and entry.origin == origin then
+            total = total + entry.quantity
+        end
+    end
+    return total
+end
+
+test("Vanilla personal receipt recovers an uncached green after auto-loot closes", function()
+    reset()
+    local link = receiptLink(15210, "Green Sword")
+    local originalGetItemInfo = GetItemInfo
+    GetItemInfo = function() return nil end
+    targetGUID = "0xF130GREENMISS001"
+    slots = {{name = "Green Sword", quantity = 1, quality = 2, icon = "green", link = nil}}
+    dispatch("LOOT_OPENED")
+    equal(table.getn(ClassicLootLogDB.entries), 0)
+    dispatch("LOOT_CLOSED")
+    slots = {}
+    dispatch("CHAT_MSG_LOOT", "You receive loot: " .. link .. ".")
+    tick(0.3)
+    GetItemInfo = originalGetItemInfo
+    equal(receivedQuantity(15210, "drop"), 1)
+    equal(ClassicLootLogDB.entries[1].quality, 2)
+end)
+
+
+local function personalLoot(link, amount)
+    local suffix = amount and amount > 1 and ("x" .. amount) or ""
+    dispatch("CHAT_MSG_LOOT", "You receive loot: " .. link .. suffix .. ".")
+end
+
+local function completeTestDisenchant(token)
+    if ns.Compat.IsLegacy then dispatch("SPELLCAST_STOP")
+    else dispatch("UNIT_SPELLCAST_SUCCEEDED", "player", token, 13262) end
+end
+
+local function beginTestDisenchant(token)
+    local original = receiptLink(15210, "Disenchant Sword")
+    ns.Core.AddSnapshot(ClassicLootLogDB, {{kind = "item", link = original,
+        name = "Disenchant Sword", quantity = 1, quality = 2,
+        sourceGUID = "original:" .. token}}, stamp, clock)
+    bags[0] = {{link = original, name = "Disenchant Sword", quantity = 1, quality = 2, icon = "green"}}
+    if ns.Compat.IsLegacy then dispatch("SPELLCAST_START", "Disenchant", 3000)
+    else dispatch("UNIT_SPELLCAST_SENT", "player", original, token, 13262) end
+    clock = clock + 3
+    return original
+end
+
+local function dustSlot(id, name, amount)
+    return {kind = LOOT_SLOT_ITEM, link = receiptLink(id, name, "ffffffff"),
+        name = name, icon = "dust", quantity = amount, quality = 1, sources = {}}
+end
+
+local function resetReceiptTest()
+    if ns.Compat.IsLegacy then reset() else resetSession() end
+end
+
+test("slot capture personal receipt and corpse reopen reconcile the same green payload once", function()
+    resetReceiptTest()
+    if ns.Compat.IsLegacy then targetGUID = "0xF130GREENDEDUPE01" end
+    local original = receiptLink(7909, "Aquamarine")
+    slots = {{name = "Aquamarine", quantity = 1, quality = 2, icon = "gem", link = original,
+        sources = {"Creature-green-dedup", 1}}}
+    dispatch("LOOT_OPENED")
+    equal(receivedQuantity(7909, "drop"), 1)
+    dispatch("LOOT_CLOSED")
+    personalLoot(receiptLink(7909, "Localized gem name", "FF1EFF00"))
+    equal(receivedQuantity(7909, "drop"), 1)
+    dispatch("LOOT_OPENED")
+    equal(receivedQuantity(7909, "drop"), 1)
+    dispatch("LOOT_CLOSED")
+end)
+
+test("cumulative personal receipts recover identical partial stacks without counting the visible stack twice", function()
+    resetReceiptTest()
+    if ns.Compat.IsLegacy then targetGUID = "0xF130PARTIALSTACK01" end
+    local link = receiptLink(2589, "Linen Cloth", "ffffffff")
+    slots = {{name = "Linen Cloth", quantity = 1, quality = 1, icon = "cloth", link = link,
+        sources = {"Creature-partial-receipts", 1}}}
+    dispatch("LOOT_OPENED")
+    personalLoot(link)
+    equal(receivedQuantity(2589, "drop"), 1)
+    personalLoot(link)
+    equal(receivedQuantity(2589, "drop"), 2)
+    dispatch("LOOT_CLOSED")
+    slots[1].quantity, slots[1].sources[2] = 2, 2
+    dispatch("LOOT_OPENED")
+    equal(receivedQuantity(2589, "drop"), 2)
+    dispatch("LOOT_CLOSED")
+end)
+
+test("received group-roll greens are personal loot while another member's receipt remains group history", function()
+    resetReceiptTest()
+    partyCount, lootMethod = 2, "group"
+    local link = receiptLink(15210, "Won Green Sword")
+    lootRolls[1991] = {link = link, name = "Won Green Sword", quantity = 1, quality = 2}
+    dispatch("START_LOOT_ROLL", 1991, 60000)
+    dispatch("CHAT_MSG_LOOT", "Alice receives loot: " .. link .. ".")
+    equal(receivedQuantity(15210, "drop"), 0)
+    personalLoot(link)
+    equal(receivedQuantity(15210, "drop"), 1)
+    equal(ClassicLootLogDB.entries[1].quality, 2)
+end)
+
+test("all Vanilla dust grades including Illusion Dust are produced materials with their real quantities", function()
+    resetReceiptTest()
+    local dusts = {{10940, "Strange Dust"}, {11083, "Soul Dust"}, {11137, "Vision Dust"},
+        {11176, "Dream Dust"}, {16204, "Illusion Dust"}}
+    for index, dust in ipairs(dusts) do
+        slots = {}
+        local token = "Cast-dust-grade-" .. index
+        beginTestDisenchant(token)
+        bags[0] = {}
+        completeTestDisenchant(token)
+        slots = {dustSlot(dust[1], dust[2], index)}
+        dispatch("LOOT_OPENED")
+        personalLoot(slots[1].link, index)
+        equal(receivedQuantity(dust[1], "disenchant"), index)
+        equal(receivedQuantity(dust[1], "drop"), 0)
+        dispatch("LOOT_CLOSED")
+    end
+    local summary = ns.Finance.Summary(ClassicLootLogDB)
+    equal(summary.totalMaterials, 15)
+    equal(table.getn(summary.materialRows), 5)
+    equal(summary.originalsDisenchanted, 5)
+    ns.App:SetTab("finance")
+    local foundIllusion = false
+    for _, row in ipairs(ns.App.financeMaterialRows) do
+        if row:IsShown() and string.find(row.item:GetText(), "Illusion Dust", 1, true) then
+            foundIllusion = row.quantity:GetText() == "5"
+        end
+    end
+    assert(foundIllusion, "Illusion Dust must appear in Finances with its produced quantity")
+end)
+
+test("late uncached Illusion Dust receipt retains the closed disenchant window's provenance", function()
+    resetReceiptTest()
+    local token = "Cast-uncached-illusion-dust"
+    beginTestDisenchant(token)
+    bags[0] = {}
+    completeTestDisenchant(token)
+    local originalGetItemInfo = GetItemInfo
+    GetItemInfo = function() return nil end
+    slots = {dustSlot(16204, "Illusion Dust", 4)}
+    slots[1].link = nil
+    dispatch("LOOT_OPENED")
+    dispatch("LOOT_CLOSED")
+    slots = {}
+    personalLoot(receiptLink(16204, "Illusion Dust", "ffffffff"), 4)
+    GetItemInfo = originalGetItemInfo
+    equal(receivedQuantity(16204, "disenchant"), 4)
+    equal(receivedQuantity(16204, "drop"), 0)
+    equal(ns.Finance.Summary(ClassicLootLogDB).totalMaterials, 4)
+end)
+
+test("auto-looted pending disenchant snapshots survive window close and late receipt without duplication", function()
+    resetReceiptTest()
+    local token = "Cast-fast-illusion-dust"
+    beginTestDisenchant(token)
+    slots = {dustSlot(16204, "Illusion Dust", 3)}
+    dispatch("LOOT_OPENED")
+    equal(receivedQuantity(16204, "disenchant"), 0)
+    dispatch("LOOT_CLOSED")
+    slots, bags[0] = {}, {}
+    completeTestDisenchant(token)
+    equal(receivedQuantity(16204, "disenchant"), 3)
+    local link = receiptLink(16204, "Illusion Dust", "ffffffff")
+    personalLoot(link, 3)
+    equal(receivedQuantity(16204, "disenchant"), 3)
+    equal(ns.Finance.Summary(ClassicLootLogDB).totalMaterials, 3)
+    if ns.Compat.IsLegacy then targetGUID = "0xF130NORMALDUST001" end
+    slots = {dustSlot(16204, "Illusion Dust", 2)}
+    slots[1].sources = {"Creature-normal-dust", 2}
+    dispatch("LOOT_OPENED")
+    personalLoot(link, 2)
+    equal(receivedQuantity(16204, "drop"), 2)
+    equal(receivedQuantity(16204, "disenchant"), 3)
+    dispatch("LOOT_CLOSED")
+end)
+
+test("cancelled casts do not turn normal dust loot into disenchant results or count pushed and created items", function()
+    resetReceiptTest()
+    local original = receiptLink(15210, "Not Disenchanted")
+    bags[0] = {{link = original, name = "Not Disenchanted", quantity = 1, quality = 2, icon = "green"}}
+    if ns.Compat.IsLegacy then
+        dispatch("SPELLCAST_START", "Disenchant", 3000)
+        dispatch("SPELLCAST_INTERRUPTED")
+    else
+        dispatch("UNIT_SPELLCAST_SENT", "player", original, "Cast-cancelled-dust", 13262)
+        dispatch("UNIT_SPELLCAST_FAILED", "player", "Cast-cancelled-dust", 13262)
+    end
+    if ns.Compat.IsLegacy then targetGUID = "0xF130DUSTDROP001" end
+    slots = {dustSlot(16204, "Illusion Dust", 2)}
+    slots[1].sources = {"Creature-dust-after-cancel", 2}
+    dispatch("LOOT_OPENED")
+    personalLoot(slots[1].link, 2)
+    equal(receivedQuantity(16204, "drop"), 2)
+    equal(receivedQuantity(16204, "disenchant"), 0)
+    dispatch("LOOT_CLOSED")
+    local ignored = receiptLink(11137, "Vision Dust", "ffffffff")
+    dispatch("CHAT_MSG_LOOT", "You receive item: " .. ignored .. ".")
+    dispatch("CHAT_MSG_LOOT", "You create: " .. ignored .. ".")
+    dispatch("CHAT_MSG_LOOT", "Alice receives loot: " .. ignored .. ".")
+    equal(receivedQuantity(11137, "drop"), 0)
+    equal(receivedQuantity(11137, "disenchant"), 0)
+    equal(ns.Finance.Summary(ClassicLootLogDB).totalMaterials, 0)
 end)
 
 print(passed .. " legacy UI tests passed")

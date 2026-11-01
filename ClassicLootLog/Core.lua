@@ -29,6 +29,14 @@ local function text(value, fallback)
     return fallback or ""
 end
 
+function Core.ItemPayload(link)
+    if type(link) ~= "string" then return nil end
+    local payload = match(link, "|H(item:[^|]+)|h") or match(link, "^(item:[%d:%-]+)$")
+    if not payload then return nil end
+    while string.find(payload, ":0$") do payload = string.sub(payload, 1, -3) end
+    return payload
+end
+
 function Core.Initialize(saved, now)
     local db = type(saved) == "table" and saved or {}
     db.entries = type(db.entries) == "table" and db.entries or {}
@@ -39,13 +47,21 @@ function Core.Initialize(saved, now)
     -- GetTime() belongs to the current login. Never count time spent offline.
     db.timer.startedAt = db.timer.enabled and number(now) or nil
     local lastID = 0
+    local aliases = {}
     for _, entry in ipairs(db.entries) do
         if type(entry) == "table" then
             lastID = max(lastID, positiveInteger(entry.id))
             entry.origin = entry.origin == "disenchant" and "disenchant" or "drop"
             entry.disenchanted = math.min(positiveInteger(entry.quantity), positiveInteger(entry.disenchanted))
+            local payload = entry.kind == "item" and Core.ItemPayload(entry.link)
+            if payload and type(entry.source) == "string" then
+                local origin = entry.origin == "disenchant" and "disenchant:" or ""
+                local key = origin .. string.len(entry.source) .. ":" .. entry.source .. "item:" .. payload
+                aliases[key] = (aliases[key] or 0) + positiveInteger(entry.quantity)
+            end
         end
     end
+    for key, amount in pairs(aliases) do db.seen[key] = max(positiveInteger(db.seen[key]), amount) end
     db.nextID = max(lastID + 1, positiveInteger(db.nextID), 1)
     db.mobs = type(db.mobs) == "table" and db.mobs or {}
     db.mobs.total = positiveInteger(db.mobs.total)
@@ -130,7 +146,7 @@ local function identity(slot)
         return "money"
     end
     if kind == "item" then
-        return kind .. ":" .. text(slot.link, text(slot.name, "Unknown item"))
+        return kind .. ":" .. (Core.ItemPayload(slot.link) or text(slot.link, text(slot.name, "Unknown item")))
     end
     return kind .. ":" .. text(slot.link, text(slot.name, kind))
 end

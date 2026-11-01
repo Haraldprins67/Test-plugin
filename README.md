@@ -1,8 +1,8 @@
 # Classic Loot Log — OctoWoW
 
-**Version 1.8.1** targets **OctoWoW's WoW 1.12.1 / Lua 5.0 client** (`Interface: 11200`). It provides an English interface using the original WoW dialog background, decorative border, gold headings and standard buttons.
+**Version 1.8.2** targets **OctoWoW's WoW 1.12.1 / Lua 5.0 client** (`Interface: 11200`). It provides an English interface using the original WoW dialog background, decorative border, gold headings and standard buttons.
 
-**[Download ClassicLootLog-1.8.1-OctoWoW.zip](downloads/ClassicLootLog-1.8.1-OctoWoW.zip?raw=true)**
+**[Download ClassicLootLog-1.8.2-OctoWoW.zip](downloads/ClassicLootLog-1.8.2-OctoWoW.zip?raw=true)**
 
 ## Install or update
 
@@ -195,17 +195,19 @@ Reopening the same recorded loot, loading saved history, and disenchant material
 
 ## What is recorded?
 
-Loot is recorded when your own loot window opens, whether or not you take the item. Items, money and currencies exposed by the client are kept in the log. Unopened corpses and loot visible only to other players are not available to the addon. This is not an inventory tracker or a record of which party member received each item.
+Loot is recorded when your own loot window opens, whether or not you take the item. Items, money and currencies exposed by the client are kept in the log. Confirmed personal loot receipts also recover items missed by a fast-closing window, including uncommon green items and group-roll items you receive without an open corpse window. Other players' receipts stay in the Party / Raid tracker rather than becoming your personal receipt entries. This is not an inventory tracker; the addon cannot reconstruct unobserved loot from unopened corpses.
 
 When loot-source GUIDs or OctoWoW's targeted-corpse GUID are available, reopening or partially looting the same corpse is deduplicated. Without a stable source ID, deduplication is limited to the current loot window; reopening may add another entry. Resetting intentionally clears this history.
 
-Incomplete item data is retried up to five times while the loot window remains open. Auto-loot can remove an item before its data arrives, and incomplete snapshots of identical stacks can undercount. Removed data cannot be reconstructed afterwards.
+Incomplete item data is retried up to five times while the loot window remains open. A personal receipt supplies the item hyperlink and actual quantity when auto-loot removes an item before its slot metadata arrives. Slot observations and cumulative receipts share the same corpse or cast source where identifiable, preventing duplicate counts while recovering separately received identical stacks. Display color/name changes do not create a new item identity; different random suffix payloads remain separate. Without an identifiable source or a receipt, missing data cannot be reconstructed reliably.
+
+Disenchant materials are captured without a quality filter. **Strange Dust, Soul Dust, Vision Dust, Dream Dust and Illusion Dust**, as well as essences, shards and crystals, appear in the produced-material list with their actual quantities. A pending disenchant window is buffered until the cast outcome is known, even if auto-loot closes it first. Confirmed recent casts can supply context for delayed Classic material receipts. A dust item looted from a normal corpse remains an ordinary drop; the item ID alone never proves it was produced by disenchanting. Crafting and pushed item messages are not treated as dropped loot.
 
 ## Mob counter and mobs per hour
 
 The counter includes your kills, pet kills and group/raid kills that your client observes. It does not count every nearby death.
 
-On OctoWoW, legacy combat messages are matched against the client's damage/death templates and your party/raid names. Observed participation is followed by a death message, or a personal/group kill message directly identifies the kill. Optional target GUIDs improve identification and deduplication. Pets and group targets are included when their names or GUIDs are available.
+On OctoWoW, legacy combat messages are matched against the client's damage/death templates and your party/raid names, including group-pet combat channels. Observed participation is followed by a death message, or a personal/group kill message directly identifies the kill. Optional target GUIDs keep different same-name mobs separate. A known NPC observed alive and then dead can also count through target health/flag events when prior participation or a pre-death group tap proves it belongs to your session. Selecting an old corpse does not count as a new kill. Player, pet and group targets are considered; unrelated nearby kills remain excluded.
 
 Old combat messages do not provide the same structured identifiers as modern WoW. Without a GUID, simultaneous mobs with the same name can be ambiguous, some group kills can be missed, and a PvP target absent from the available unit tokens cannot always be distinguished by name alone. Combat-log range also limits what can be observed. The counter should therefore be treated as an observed-session statistic, not a guaranteed server-wide count. Participation expires after 30 minutes, and tracking of surviving mobs restarts after `/reload`.
 
@@ -245,7 +247,7 @@ There is no fixed history limit. Resetting the live session preserves saved repo
 
 ## Development and validation
 
-WoW loads `Compat.lua`, `Core.lua`, `Tracking.lua`, `Value.lua`, `GroupLoot.lua`, `GroupEvents.lua`, `Finance.lua`, `Money.lua`, `Merchant.lua`, `Mini.lua`, `FileExport.lua`, `SavedLogs.lua`, `MinimapButton.lua`, `LogsPanel.lua` and `Main.lua` in that order. The manual and launcher TOCs reference the same files. No build or runtime dependencies are needed by the addon. Use the existing checkout in cloud tasks; they are already isolated and do not need extra Git worktrees.
+WoW loads `Compat.lua`, `Core.lua`, `Tracking.lua`, `Value.lua`, `GroupLoot.lua`, `GroupEvents.lua`, `LootReceipts.lua`, `Finance.lua`, `Money.lua`, `Merchant.lua`, `Mini.lua`, `FileExport.lua`, `SavedLogs.lua`, `MinimapButton.lua`, `LogsPanel.lua` and `Main.lua` in that order. The manual and launcher TOCs reference the same files. No build or runtime dependencies are needed by the addon. Use the existing checkout in cloud tasks; they are already isolated and do not need extra Git worktrees.
 
 The Python test runner uses Lupa for Lua 5.1 regression tests:
 

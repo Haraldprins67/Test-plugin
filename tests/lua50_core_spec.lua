@@ -41,6 +41,28 @@ check("Lua 5.0 snapshots aggregate stacks and preserve corpse deduplication", fu
     equal(Core.AddSnapshot(db, {slot("corpse-new", 2)}, 1003, 3), 1)
 end)
 
+check("loot identity ignores display formatting while keeping random suffix variants", function()
+    local db = Core.Initialize(nil, 0)
+    local green = "|cff1eff00|Hitem:15210:0:0:0|h[Green sword]|h|r"
+    equal(Core.AddSnapshot(db, {slot("green-corpse", 1, green)}, 1000, 0), 1)
+    equal(Core.AddSnapshot(db, {slot("green-corpse", 1, "item:15210")}, 1001, 1), 0)
+    equal(Core.AddSnapshot(db, {slot("green-corpse", 1, "|Hitem:15210:0:0:0|h[Renamed sword]|h")}, 1002, 2), 0)
+    equal(Core.AddSnapshot(db, {slot("green-corpse", 1, "item:15210:0:123:0")}, 1003, 3), 1)
+    equal(Core.AddSnapshot(db, {slot("green-corpse", 1, "item:15210:0:456:0")}, 1004, 4), 1)
+end)
+
+check("old saved histories retain source deduplication after item identity normalization", function()
+    local link = "|cff1eff00|Hitem:15210:0:0:0|h[Old green sword]|h|r"
+    local source = "old-corpse"
+    local legacyKey = string.len(source) .. ":" .. source .. "item:" .. link
+    local db = Core.Initialize({entries = {{id = 1, kind = "item", link = link, source = source, quantity = 2}},
+        seen = {[legacyKey] = 2}}, 0)
+    equal(Core.AddSnapshot(db, {slot(source, 2, "item:15210")}, 1001, 1), 0)
+    equal(Core.AddSnapshot(db, {slot(source, 3, link)}, 1002, 2), 1)
+    equal(db.entries[2].quantity, 1)
+    equal(db.seen[legacyKey], 2)
+end)
+
 check("Lua 5.0 timer and mob rates exclude paused time and kills", function()
     local db = Core.Initialize(nil, 0)
     Core.RecordMobKill(db, "untimed", "Wolf", 1000, 1)

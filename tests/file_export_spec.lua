@@ -52,7 +52,7 @@ end
 test("complete report includes hidden history statistics group details and mob kills", function()
     local db, model, entry = fixture()
     local report = FileExport.BuildReport(db, model, options())
-    assert(string.find(report, "^Classic Loot Log export\t1%.8%.1"))
+    assert(string.find(report, "^Classic Loot Log export\t1%.8%.2"))
     assert(string.find(report, "End Classic Loot Log export\n$"))
     assert(string.find(report, "Linen 1", 1, true))
     assert(string.find(report, "Linen 20", 1, true))

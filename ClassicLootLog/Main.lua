@@ -9,6 +9,7 @@ local Core = ns.Core
 local Tracker = ns.Tracker
 local Value = ns.Value
 local GroupEvents = ns.GroupEvents
+local LootReceipts = ns.LootReceipts
 local Finance = ns.Finance
 local Money = ns.Money
 local Merchant = ns.Merchant
@@ -989,15 +990,141 @@ function App:Toggle()
     end
 end
 
+function App:LootAdded(firstNewEntry, added)
+    if added <= 0 then return end
+    Value.NotifyEntries(self.db, firstNewEntry)
+    if self.groupAdapter:Method() == "master" then
+        for index = firstNewEntry, table.getn(self.db.entries) do
+            local entry = self.db.entries[index]
+            if entry.kind == "item" and entry.origin ~= "disenchant" then
+                self.groupAdapter:ObserveItem(entry.link, entry.name, entry.quality, tostring(entry.source) .. ":" .. entry.id)
+            end
+        end
+    end
+    self:Refresh()
+end
+
+function App:CommitLootSlots(slots, stamp, clock)
+    local first = table.getn(self.db.entries) + 1
+    local added = Core.AddSnapshot(self.db, slots, stamp, clock)
+    self:LootAdded(first, added)
+end
+
+function App:RememberLootSlots(window, slots)
+    local totals, sources = {}, {}
+    for _, slot in ipairs(slots) do
+        local key = slot.kind == "item" and LootReceipts.Key(slot.link)
+        if key then
+            totals[key] = (totals[key] or 0) + slot.quantity
+            sources[key] = sources[key] or {}
+            for _, source in ipairs(slot.sources or {}) do sources[key][source.guid] = true end
+        end
+    end
+    for key, total in pairs(totals) do
+        local guid, count = nil, 0
+        for source in pairs(sources[key]) do guid = source; count = count + 1 end
+        local options = window.items[key] or {}
+        if count == 1 then options.sourceGUID = guid
+        else
+            options.sourceGUID = window.id .. ":receipts"
+            options.observedQuantity = math.max(options.observedQuantity or 0, total)
+        end
+        options.origin = window.context and "disenchant" or "drop"
+        options.sourceLabel = window.context and "Disenchant" or nil
+        window.items[key] = options
+    end
+end
+
+function App:ReceiptOptions(slot, window)
+    local key = LootReceipts.Key(slot.link)
+    if window then
+        if window.context then
+            return {sourceGUID = window.context.sourceGUID, origin = "disenchant", sourceLabel = "Disenchant"}
+        end
+        if window.items[key] then return window.items[key] end
+        return {sourceGUID = window.sourceGUID or window.id, origin = "drop"}
+    end
+    return nil
+end
+
+function App:PendingLoot(cast)
+    if not self.pendingLoot or self.pendingLoot.cast ~= cast then
+        self.pendingLoot = {cast = cast, snapshots = {}, receipts = {}}
+    end
+    return self.pendingLoot
+end
+
+function App:FlushPendingLoot()
+    local pending = self.pendingLoot
+    if not pending then return end
+    local cast = pending.cast
+    if not cast.succeededAt and self.tracker.cast == cast then return end
+    self.pendingLoot = nil
+    local context = cast.succeededAt and not (pending.window and pending.window.regularSource)
+        and {sourceGUID = cast.sourceGUID} or nil
+    if context and (pending.window or table.getn(pending.receipts) > 0) then cast.lootConsumed = true end
+    if context and pending.window then pending.window.context = context end
+    for _, snapshot in ipairs(pending.snapshots) do
+        if context then
+            snapshot.window.context = context
+            for _, slot in ipairs(snapshot.slots) do
+                slot.origin, slot.sourceLabel = "disenchant", "Disenchant"
+                slot.sources = {{guid = context.sourceGUID, quantity = slot.quantity}}
+            end
+        end
+        self:RememberLootSlots(snapshot.window, snapshot.slots)
+        self:CommitLootSlots(snapshot.slots, snapshot.timestamp, snapshot.clock)
+    end
+    for _, receipt in ipairs(pending.receipts) do
+        local options = context and {sourceGUID = context.sourceGUID, origin = "disenchant", sourceLabel = "Disenchant"}
+            or self:ReceiptOptions(receipt.slot, receipt.window)
+        self.lootReceipts:RecordSlot(receipt.slot, options)
+    end
+end
+
+function App:HandleLootReceipt(message)
+    local slot = LootReceipts.Parse(message)
+    if not slot then return end
+    local cast = self.tracker.cast
+    if self.tracker:IsDisenchantPending() and cast then
+        local pending = self:PendingLoot(cast)
+        pending.receipts[table.getn(pending.receipts) + 1] = {slot = slot, window = self.lootWindow}
+        return
+    end
+    local window = self.lootWindow
+    if window and window.closedAt then
+        local age = now() - window.closedAt
+        local key = LootReceipts.Key(slot.link)
+        if age > 2 and (not window.items[key] or age > 120) then window = nil end
+    end
+    -- A late receipt may follow an already closed DE window. Only a confirmed
+    -- recent cast and a recognized material can supply that missing context.
+    local recentDE = cast and cast.succeededAt and now() - cast.succeededAt <= 10
+    if recentDE and LootReceipts.IsEnchantMaterial(slot.link)
+        and not (self.lootWindow and self.lootWindow.regularSource)
+        and (not self.lootWindow or self.lootWindow.cast == cast
+            or (self.lootWindow.context and self.lootWindow.context.sourceGUID == cast.sourceGUID)) then
+        cast.lootConsumed = true
+        self.lootReceipts:RecordSlot(slot, {sourceGUID = cast.sourceGUID, origin = "disenchant", sourceLabel = "Disenchant"})
+    else
+        self.lootReceipts:RecordSlot(slot, self:ReceiptOptions(slot, window))
+    end
+end
+
 function App:CaptureLoot()
     if not self.db then return end
     if not lootSession then
         lootSequence = lootSequence + 1
         lootSession = "window:" .. tostring(time()) .. ":" .. tostring(lootSequence)
         fallbackIdentities = {}
+        local corpse = UnitIsDead and UnitIsDead("target") and Compat.UnitGUIDSafe("target")
+        self.lootWindow = {id = lootSession, sourceGUID = corpse or lootSession, items = {}, openedAt = now()}
     end
-    if self.tracker and self.tracker:IsDisenchantPending() then return false end
+    local pending = self.tracker and self.tracker:IsDisenchantPending()
     local context = self.tracker and self.tracker:GetLootContext()
+    local window = self.lootWindow
+    if context then window.context = context end
+    if pending then window.cast = self.tracker.cast end
     local slots, complete = {}, true
     for index = 1, GetNumLootItems() do
         local icon, name, quantity, quality = Compat.GetLootSlotInfo(index)
@@ -1014,6 +1141,9 @@ function App:CaptureLoot()
             if quantity <= 0 then quantity = 1 end
             local sources = Compat.GetLootSources(index)
             for _, source in ipairs(sources) do
+                if string.find(source.guid, "^Creature%-") or string.find(source.guid, "^GameObject%-") then
+                    window.regularSource = true
+                end
                 if source.quantity <= 0 then source.quantity = quantity end
             end
             if table.getn(sources) == 0 and UnitIsDead and UnitIsDead("target") then
@@ -1022,7 +1152,7 @@ function App:CaptureLoot()
             end
             local kind = slotType == (LOOT_SLOT_MONEY or 2) and "money"
                 or slotType == (LOOT_SLOT_CURRENCY or 3) and "currency" or "item"
-            local identity = kind == "money" and kind or kind .. ":" .. (link or name)
+            local identity = kind == "money" and kind or kind .. ":" .. (Core.ItemPayload(link) or link or name)
             if table.getn(sources) == 0 then fallbackIdentities[identity] = true end
             slots[table.getn(slots) + 1] = {
                 icon = icon, name = name, quantity = quantity, quality = quality,
@@ -1041,22 +1171,16 @@ function App:CaptureLoot()
             slot.sources = { { guid = lootSession, quantity = slot.quantity } }
         end
     end
-    local firstNewEntry = table.getn(self.db.entries) + 1
-    local added = Core.AddSnapshot(self.db, slots, time(), now())
-    if added > 0 then
-        Value.NotifyEntries(self.db, firstNewEntry)
-        -- Native roll IDs identify Group Loot independently. Master Loot has
-        -- no such event, so attach newly observed originals to their source.
-        if self.groupAdapter:Method() == "master" then
-            for index = firstNewEntry, table.getn(self.db.entries) do
-                local entry = self.db.entries[index]
-                if entry.kind == "item" and entry.origin ~= "disenchant" then
-                    self.groupAdapter:ObserveItem(entry.link, entry.name, entry.quality, tostring(entry.source) .. ":" .. entry.id)
-                end
-            end
+    if pending then
+        local buffered = self:PendingLoot(self.tracker.cast)
+        buffered.window = window
+        if table.getn(slots) > 0 then
+            buffered.snapshots[table.getn(buffered.snapshots) + 1] = {slots = slots, window = window, timestamp = time(), clock = now()}
         end
-        self:Refresh()
+        return false
     end
+    self:RememberLootSlots(window, slots)
+    self:CommitLootSlots(slots, time(), now())
     return complete
 end
 
@@ -1076,6 +1200,8 @@ function App:Initialize()
     Value.Initialize(self.db)
     Finance.Initialize(self.db)
     self.moneyTracker = Money.New(self.db, {onChange = function() self:Refresh() end})
+    self.lootReceipts = LootReceipts.New(self.db, {now = now, time = time,
+        onAdded = function(first, added) self:LootAdded(first, added) end})
     SavedLogs.Initialize(self.db)
     self.merchant = Merchant.New(self.db, {now = now, time = time, onChange = function() self:Refresh() end})
     self.mini = Mini.New(self.db, {now = now})
@@ -1100,6 +1226,8 @@ function App:Initialize()
         OnAccept = function()
             Core.Reset(self.db, now())
             self.moneyTracker:Reset()
+            self.lootReceipts:Reset()
+            self.lootWindow, self.pendingLoot = nil, nil
             self.tracker:Reset()
             self.merchant:Reset()
             self.db.groupLoot = {}
@@ -1218,6 +1346,7 @@ for _, eventName in ipairs(Tracker.LegacyEvents or {}) do
 end
 Compat.SetScript(eventFrame, "OnEvent", function(_, event, a, b, c, d)
     if App.tracker then App.tracker:HandleEvent(event, a, b, c, d) end
+    if App.tracker then App:FlushPendingLoot() end
     if App.groupAdapter then App.groupAdapter:HandleEvent(event, a, b, c, d) end
     if App.merchant then App.merchant:HandleEvent(event, a, b, c, d) end
     if App.moneyTracker then App.moneyTracker:HandleEvent(event, a) end
@@ -1247,7 +1376,10 @@ Compat.SetScript(eventFrame, "OnEvent", function(_, event, a, b, c, d)
     elseif event == "PLAYER_LOGOUT" then
         if App.db then Core.CheckpointTimer(App.db, now()) end
     elseif event == "LOOT_CLOSED" then
+        if App.lootWindow then App.lootWindow.closedAt = now() end
         lootSession = nil
+    elseif event == "CHAT_MSG_LOOT" and App.db then
+        App:HandleLootReceipt(a)
     elseif event == "LOOT_READY" or event == "LOOT_OPENED" or ((event == "LOOT_SLOT_CHANGED" or event == "LOOT_SLOT_CLEARED") and lootSession) then
         captureWithRetry(0)
     elseif event == "UNIT_SPELLCAST_SUCCEEDED" or event == "UNIT_SPELLCAST_FAILED" or event == "UNIT_SPELLCAST_INTERRUPTED" then

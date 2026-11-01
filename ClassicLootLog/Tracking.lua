@@ -35,12 +35,15 @@ Tracker.LegacyEvents = {
     "CHAT_MSG_COMBAT_HOSTILE_DEATH", "CHAT_MSG_COMBAT_SELF_HITS",
     "CHAT_MSG_COMBAT_PET_HITS", "CHAT_MSG_COMBAT_PARTY_HITS",
     "CHAT_MSG_COMBAT_FRIENDLYPLAYER_HITS", "CHAT_MSG_SPELL_SELF_DAMAGE",
+    "CHAT_MSG_COMBAT_HOSTILEPLAYER_HITS", "CHAT_MSG_COMBAT_CREATURE_VS_CREATURE_HITS",
     "CHAT_MSG_SPELL_PET_DAMAGE", "CHAT_MSG_SPELL_PARTY_DAMAGE",
+    "CHAT_MSG_SPELL_HOSTILEPLAYER_DAMAGE", "CHAT_MSG_SPELL_CREATURE_VS_CREATURE_DAMAGE",
     "CHAT_MSG_SPELL_FRIENDLYPLAYER_DAMAGE", "CHAT_MSG_SPELL_PERIODIC_SELF_DAMAGE",
     "CHAT_MSG_SPELL_PERIODIC_PARTY_DAMAGE", "CHAT_MSG_SPELL_PERIODIC_FRIENDLYPLAYER_DAMAGE",
     "CHAT_MSG_SPELL_PERIODIC_CREATURE_DAMAGE", "CHAT_MSG_SPELL_DAMAGESHIELDS_ON_OTHERS",
     "SPELLCAST_START", "SPELLCAST_STOP", "SPELLCAST_FAILED", "SPELLCAST_INTERRUPTED",
     "SPELLCAST_DELAYED", "BAG_UPDATE",
+    "UNIT_HEALTH", "UNIT_FLAGS", "PLAYER_TARGET_CHANGED", "UNIT_TARGET",
 }
 
 local LEGACY_DAMAGE_EVENTS = {}
@@ -127,36 +130,79 @@ function Tracker:IsGroupName(name)
     return false
 end
 
-function Tracker:LegacyMobIdentity(name)
-    if not UnitName then return nil, false end
+function Tracker:LegacyUnitTokens()
     local units = {"target", "pettarget"}
     if self.callbacks.includeGroup then
-        for index = 1, 4 do units[getn(units) + 1] = "party" .. index .. "target" end
-        for index = 1, 40 do units[getn(units) + 1] = "raid" .. index .. "target" end
+        for index = 1, 4 do
+            units[getn(units) + 1] = "party" .. index .. "target"
+            units[getn(units) + 1] = "partypet" .. index .. "target"
+        end
+        for index = 1, 40 do
+            units[getn(units) + 1] = "raid" .. index .. "target"
+            units[getn(units) + 1] = "raidpet" .. index .. "target"
+        end
+    end
+    return units
+end
+
+function Tracker:LegacyMobIdentity(name, dying, sourceName)
+    if not UnitName then return nil, false end
+    local fallback
+    local units = self:LegacyUnitTokens()
+    if sourceName then
+        local preferred
+        if sourceName == UnitName("player") then preferred = "target"
+        elseif sourceName == UnitName("pet") then preferred = "pettarget"
+        elseif self.callbacks.includeGroup then
+            for _, prefix in ipairs({"party", "partypet", "raid", "raidpet"}) do
+                local count = (prefix == "party" or prefix == "partypet") and 4 or 40
+                for index = 1, count do
+                    local member = prefix .. index
+                    if sourceName == UnitName(member) then preferred = member .. "target"; break end
+                end
+                if preferred then break end
+            end
+        end
+        if preferred then table.insert(units, 1, preferred) end
     end
     for _, unit in ipairs(units) do
         if UnitName(unit) == name then
             if UnitIsPlayer and UnitIsPlayer(unit) then return nil, true end
             local guid = unitGUID(unit)
-            if guid then return guid, false end
+            if guid then
+                if dying and UnitIsDead and UnitIsDead(unit) and not self.legacySeen[guid] then
+                    return guid, false
+                end
+                if not fallback then fallback = guid end
+                if not dying then return guid, false end
+            end
         end
     end
-    return nil, false
+    return fallback, false
 end
 
-function Tracker:TagLegacyName(name)
+function Tracker:TagLegacyName(name, sourceName)
     if not name or name == "" then return end
-    local guid, isPlayer = self:LegacyMobIdentity(name)
+    local guid, isPlayer = self:LegacyMobIdentity(name, false, sourceName)
     if isPlayer or self:IsGroupName(name) then return end
     local list = self.legacyNames[name] or {}
     list[guid or "name"] = {at = self:Now(), guid = guid}
     self.legacyNames[name] = list
+    self:ObserveLegacyUnits()
 end
 
-function Tracker:LegacyDeath(name, direct, kind)
+function Tracker:LegacyDeath(name, direct, kind, knownGUID)
     if not name or name == "" then return end
-    local guid, isPlayer = self:LegacyMobIdentity(name)
+    local guid, isPlayer = self:LegacyMobIdentity(name, true)
+    if knownGUID then guid, isPlayer = knownGUID, false end
     if isPlayer or self:IsGroupName(name) then return end
+    local recent = self.legacyDeaths[name]
+    -- A selected old corpse must never consume another mob's participation.
+    -- Without a second identity, a same-name late line cannot safely prove
+    -- that a different mob died instead of repeating this corpse's message.
+    if guid and self.legacySeen[guid] then
+        return
+    end
     local list = self.legacyNames[name]
     local tag, tagKey
     if list then
@@ -168,9 +214,9 @@ function Tracker:LegacyDeath(name, direct, kind)
         end
     end
     if not direct and not tag then return end
-    local recent = self.legacyDeaths[name]
-    if recent and recent.kind ~= kind and self:Now() - recent.at < 0.25 then return end
     guid = tag and tag.guid or guid
+    if recent and recent.kind ~= kind and self:Now() - recent.at < 0.25
+        and (not guid or not recent.guid or guid == recent.guid) then return end
     if guid and self.legacySeen[guid] then return end
     if list and tagKey then
         list[tagKey] = nil
@@ -182,8 +228,40 @@ function Tracker:LegacyDeath(name, direct, kind)
         self.sequence = self.sequence + 1
         guid = "legacy-kill:" .. tostring(time()) .. ":" .. tostring(self.sequence)
     end
-    self.legacyDeaths[name] = {at = self:Now(), kind = kind}
+    self.legacyDeaths[name] = {at = self:Now(), kind = kind, guid = guid}
     if self.callbacks.onKill then self.callbacks.onKill(guid, name, time(), self:Now()) end
+end
+
+-- Health events can survive a missing combat-chat line. Count only a GUID
+-- observed alive first, with our/group participation or a cached group tap.
+-- Selecting an already dead corpse is deliberately not a new kill signal.
+function Tracker:ObserveLegacyUnits()
+    if not Compat.IsLegacy or not UnitName or not UnitIsDead or not UnitIsPlayer then return end
+    self.legacyUnits = self.legacyUnits or {}
+    for _, unit in ipairs(self:LegacyUnitTokens()) do
+        local name, guid = UnitName(unit), unitGUID(unit)
+        if name and guid and not UnitIsPlayer(unit) and not self:IsGroupName(name)
+            and not (UnitIsFriend and UnitIsFriend("player", unit)) then
+            local state = self.legacyUnits[guid]
+            local dead = UnitIsDead(unit)
+            if not dead then
+                state = state or {}
+                state.name, state.alive, state.at = name, true, self:Now()
+                local list = self.legacyNames[name]
+                local tag = list and list[guid]
+                local participation = tag and self:Now() - tag.at <= TAG_TIMEOUT
+                -- Vanilla's tap API includes party taps, so its evidence is
+                -- used only when group kills are enabled.
+                local tapped = self.callbacks.includeGroup and UnitIsTappedByPlayer and UnitIsTappedByPlayer(unit)
+                tapped = tapped == true or tapped == 1
+                state.eligible = state.eligible or participation or tapped
+                self.legacyUnits[guid] = state
+            elseif state and state.alive and state.eligible and self:Now() - state.at <= TAG_TIMEOUT then
+                state.alive = false
+                self:LegacyDeath(state.name, true, "unit", guid)
+            end
+        end
+    end
 end
 
 function Tracker:HandleLegacyCombat(eventName, message)
@@ -202,7 +280,8 @@ function Tracker:HandleLegacyCombat(eventName, message)
         for _, definition in ipairs(LEGACY_DAMAGE_FORMATS) do
             local captures = captureFormat(message, definition[1], definition[2])
             if captures and (definition[4] == 0 or self:IsGroupName(captures[definition[4]])) then
-                self:TagLegacyName(captures[definition[3]])
+                local sourceName = definition[4] == 0 and UnitName and UnitName("player") or captures[definition[4]]
+                self:TagLegacyName(captures[definition[3]], sourceName)
                 return
             end
         end
@@ -259,8 +338,10 @@ function Tracker.SnapshotBags()
 end
 
 function Tracker.New(callbacks)
-    return setmetatable({ callbacks = callbacks or {}, tags = {}, lastPrune = 0,
-        sequence = 0, lootOpen = false, legacyNames = {}, legacySeen = {}, legacyDeaths = {} }, Tracker)
+    local instance = setmetatable({ callbacks = callbacks or {}, tags = {}, lastPrune = 0,
+        sequence = 0, lootOpen = false, legacyNames = {}, legacySeen = {}, legacyDeaths = {}, legacyUnits = {} }, Tracker)
+    instance:ObserveLegacyUnits()
+    return instance
 end
 
 function Tracker:Now()
@@ -270,6 +351,7 @@ end
 function Tracker:Reset()
     self.tags = {}
     self.legacyNames, self.legacySeen, self.legacyDeaths = {}, {}, {}
+    self.legacyUnits = {}
     self.cast = nil
     self.context = nil
     self.lootOpen = false
@@ -291,6 +373,9 @@ function Tracker:Expire()
                 if clock - tagged.at > TAG_TIMEOUT then list[key] = nil end
             end
             if not next(list) then self.legacyNames[name] = nil end
+        end
+        for guid, state in pairs(self.legacyUnits) do
+            if clock - state.at > TAG_TIMEOUT then self.legacyUnits[guid] = nil end
         end
         self.lastPrune = clock
     end
@@ -395,7 +480,10 @@ end
 
 function Tracker:HandleEvent(event, a, b, c, d)
     self:Expire()
-    if Compat.IsLegacy and (LEGACY_DAMAGE_EVENTS[event] or event == "CHAT_MSG_COMBAT_HOSTILE_DEATH") then
+    if Compat.IsLegacy and (event == "UNIT_HEALTH" or event == "UNIT_FLAGS"
+        or event == "PLAYER_TARGET_CHANGED" or event == "UNIT_TARGET") then
+        self:ObserveLegacyUnits()
+    elseif Compat.IsLegacy and (LEGACY_DAMAGE_EVENTS[event] or event == "CHAT_MSG_COMBAT_HOSTILE_DEATH") then
         self:HandleLegacyCombat(event, a)
     elseif Compat.IsLegacy and event == "SPELLCAST_START" then
         local disenchantName = GetSpellInfo and GetSpellInfo(DISENCHANT) or "Disenchant"
