@@ -52,6 +52,11 @@ function Core.Initialize(saved, now)
     db.mobs.timed = math.min(db.mobs.total, positiveInteger(db.mobs.timed))
     db.mobs.seen = type(db.mobs.seen) == "table" and db.mobs.seen or {}
     db.mobs.kills = type(db.mobs.kills) == "table" and db.mobs.kills or {}
+    db.ui = type(db.ui) == "table" and db.ui or {}
+    db.ui.width = math.min(1280, max(680, number(db.ui.width, 900)))
+    db.ui.height = math.min(900, max(430, number(db.ui.height, 590)))
+    db.ui.autoText = db.ui.autoText ~= false
+    db.ui.locked = db.ui.locked == true
     db.version = 2
     return db
 end

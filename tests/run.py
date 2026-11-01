@@ -18,6 +18,7 @@ def main() -> None:
     options = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     os.chdir(root)
+    subprocess.run([sys.executable, "tests/distribution_spec.py"], check=True)
     for suite in ("tests/core_spec.lua", "tests/stats_spec.lua", "tests/tracking_spec.lua",
                   "tests/wow_stub_spec.lua"):
         print(f"Running {suite} with Lua 5.1", flush=True)
@@ -29,6 +30,7 @@ def main() -> None:
         "tests/compat_spec.lua",
         "tests/legacy_tracking_spec.lua",
         "tests/legacy_ui_spec.lua",
+        "tests/value_spec.lua",
     )
     for suite in legacy_suites:
         print(f"Running {suite} with Lua 5.1", flush=True)

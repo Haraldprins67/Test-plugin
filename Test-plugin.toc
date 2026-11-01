@@ -1,0 +1,12 @@
+## Interface: 11200
+## Title: Classic Loot Log
+## Notes: Resizable loot log, mob statistics, vendor values and epic drop alerts for OctoWoW.
+## Author: Haraldprins67
+## Version: 1.3.0
+## SavedVariablesPerCharacter: ClassicLootLogDB
+
+ClassicLootLog\Compat.lua
+ClassicLootLog\Core.lua
+ClassicLootLog\Tracking.lua
+ClassicLootLog\Value.lua
+ClassicLootLog\Main.lua

@@ -1,14 +1,22 @@
 ClassicLootLogNS = ClassicLootLogNS or {}
 local ns = ClassicLootLogNS
+-- The manual ZIP and the launcher entry point share one running instance.
+if ns.App then return end
 local addonName = "ClassicLootLog"
+local launcherAddonName = "Test-plugin"
 local Compat = ns.Compat
 local Core = ns.Core
 local Tracker = ns.Tracker
+local Value = ns.Value
 local App = {}
 ns.App = App
 
 local ROWS = 13
+local MAX_ROWS = 30
 local ROW_HEIGHT = 25
+local MIN_WIDTH, MAX_WIDTH = 680, 1280
+local MIN_HEIGHT, MAX_HEIGHT = 430, 900
+local activeFontGroup
 local RESET_DIALOG = "CLASSICLOOTLOG_CONFIRM_RESET"
 local eventFrame = CreateFrame("Frame")
 local lootSession, lootSequence = nil, 0
@@ -24,6 +32,13 @@ local function say(message)
     end
 end
 
+local function toggleArgument(argument, current)
+    if argument == "" then return not current end
+    if argument == "on" or argument == "aan" then return true end
+    if argument == "off" or argument == "uit" then return false end
+    return nil
+end
+
 local function backdrop(frame)
     if frame.SetBackdrop then
         frame:SetBackdrop({
@@ -36,12 +51,26 @@ local function backdrop(frame)
     end
 end
 
+local function rememberFont(font)
+    if not activeFontGroup or not font then return end
+    local path, size, flags = font:GetFont()
+    if path and size then
+        activeFontGroup[table.getn(activeFontGroup) + 1] = { font = font, path = path, size = size, flags = flags or "" }
+    end
+end
+
+local function place(region, parent, x, y, width)
+    region:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
+    if width then region:SetWidth(width) end
+end
+
 local function label(parent, text, x, y, width, template)
     local font = parent:CreateFontString(nil, "OVERLAY", template or "GameFontHighlightSmall")
     font:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
     if width then font:SetWidth(width) end
     font:SetJustifyH("LEFT")
     font:SetText(text)
+    rememberFont(font)
     return font
 end
 
@@ -50,6 +79,7 @@ local function button(parent, text, width, x, y, onClick)
     Compat.SetSize(control, width, 25)
     control:SetPoint("TOPLEFT", parent, "TOPLEFT", x, y)
     control:SetText(text)
+    if activeFontGroup and control.GetFontString then rememberFont(control:GetFontString()) end
     Compat.SetScript(control, "OnClick", onClick)
     return control
 end
@@ -72,6 +102,7 @@ local function movableFrame(name, width, height, title)
     header:SetPoint("TOP", frame, "TOP", 0, 12)
     local titleText = label(frame, title, (width - 320) / 2, -14, 320, "GameFontNormalLarge")
     titleText:SetJustifyH("CENTER")
+    frame.titleText = titleText
     local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -3, -3)
     table.insert(UISpecialFrames, name)
@@ -101,7 +132,7 @@ function App:Refresh()
         end
     end
     local count = table.getn(records)
-    local maxOffset = math.max(0, count - ROWS)
+    local maxOffset = math.max(0, count - (self.visibleRows or ROWS))
     self.offset = math.min(self.offset or 0, maxOffset)
     self.scrollbar:SetMinMaxValues(0, maxOffset)
     self.scrollbar:SetValue(self.offset)
@@ -123,14 +154,15 @@ function App:Refresh()
     else self.markButton:Disable(); self.unmarkButton:Disable() end
     for index, row in ipairs(self.rows) do
         local recordIndex = self.view == "stats" and (self.offset + index) or (count - self.offset - index + 1)
-        local entry = records[recordIndex]
+        local entry = index <= (self.visibleRows or ROWS) and records[recordIndex] or nil
         row.entry = entry
-        if entry then
+        if entry and index <= (self.visibleRows or ROWS) then
             row.clock:SetText(entry.timestamp and date("%H:%M:%S", entry.timestamp) or "")
             row.elapsed:SetText(entry.elapsed ~= nil and Core.FormatElapsed(entry.elapsed) or "-")
             row.icon:SetTexture(entry.icon or "Interface\\Icons\\INV_Misc_QuestionMark")
             row.item:SetText(entry.link and entry.link ~= "" and entry.link or entry.name or "Unknown loot")
             row.quantity:SetText(tostring(entry.quantity))
+            row.vendor:SetText(ns.Value and ns.Value.GetEntryVendorText and ns.Value.GetEntryVendorText(self.db, entry) or "-")
             local isMaterial = entry.origin == "disenchant" or entry.isMaterial
             local percent = not isMaterial and entry.kind ~= "money" and entry.kind ~= "currency"
                 and percentages[entry.key or Core.ItemKey(entry.link, entry.name)] or nil
@@ -220,46 +252,165 @@ function App:ShowExport(mode)
         self.exportFrame = frame
     end
     self.exportFrame:Show()
-    self.exportFrame.edit:SetText(mode == "stats" and Core.ExportSummary(self.db, now()) or Core.Export(self.db, formatTimestamp))
+    local exported
+    if mode == "stats" then
+        exported = Value.AppendSummary(self.db, Core.ExportSummary(self.db, now()))
+    else
+        exported = Value.AppendExportColumns(self.db, Core.Export(self.db, formatTimestamp))
+    end
+    self.exportFrame.edit:SetText(exported)
     self.exportFrame.edit:SetFocus()
     self.exportFrame.edit:HighlightText()
 end
 
+function App:Layout()
+    if not self.frame or self.layouting then return end
+    self.layouting = true
+    local frame = self.frame
+    local width = math.max(MIN_WIDTH, math.min(MAX_WIDTH, frame:GetWidth()))
+    local height = math.max(MIN_HEIGHT, math.min(MAX_HEIGHT, frame:GetHeight()))
+    if frame:GetWidth() ~= width then frame:SetWidth(width) end
+    if frame:GetHeight() ~= height then frame:SetHeight(height) end
+    local settings = self.db.ui
+    settings.width, settings.height = width, height
+    local textScale = settings.autoText and math.max(0.8, math.min(1.3, width / 900)) or 1
+    self.textScale = textScale
+    for _, style in ipairs(self.fonts) do
+        style.font:SetFont(style.path, style.size * textScale, style.flags)
+    end
+    local rowHeight = math.floor(ROW_HEIGHT * textScale + 0.5)
+    self.visibleRows = math.max(1, math.min(MAX_ROWS, math.floor((height - 265) / rowHeight)))
+    local usable = width - 56
+    local clockWidth = 70 * textScale
+    local elapsedX, elapsedWidth = clockWidth + 8, 75 * textScale
+    local iconX = elapsedX + elapsedWidth + 8
+    local iconSize = 20 * textScale
+    local itemX = iconX + iconSize + 6
+    local processingWidth, vendorWidth = 90 * textScale, 100 * textScale
+    local percentWidth, quantityWidth = 55 * textScale, 40 * textScale
+    local processingX = usable - processingWidth
+    local vendorX = processingX - 8 - vendorWidth
+    local percentX = vendorX - 8 - percentWidth
+    local quantityX = percentX - 8 - quantityWidth
+    local itemWidth = math.max(70, quantityX - itemX - 8)
+    local top = 170
+    place(frame.titleText, frame, (width - 320) / 2, -14, 320)
+    place(self.resetButton, frame, 18, -54, 84)
+    place(self.exportButton, frame, 108, -54, 106)
+    place(self.timerButton, frame, 220, -54, 106)
+    place(self.timerText, frame, 340, -61, math.max(150, width - 480))
+    place(self.viewButton, frame, width - 133, -54, 115)
+    place(self.mobText, frame, 18, -94, width - 36)
+    place(self.status, frame, 18, -119, width - 36)
+    place(self.headers.clock, frame, 18, -149, clockWidth)
+    place(self.headers.elapsed, frame, 18 + elapsedX, -149, elapsedWidth)
+    place(self.headers.item, frame, 18 + itemX, -149, itemWidth)
+    place(self.headers.quantity, frame, 18 + quantityX, -149, quantityWidth)
+    place(self.headers.percent, frame, 18 + percentX, -149, percentWidth)
+    place(self.headers.vendor, frame, 18 + vendorX, -149, vendorWidth)
+    place(self.headers.processing, frame, 18 + processingX, -149, processingWidth)
+    place(self.empty, frame, 22, -187, width - 60)
+    for index, row in ipairs(self.rows) do
+        Compat.SetSize(row, usable, rowHeight)
+        place(row, frame, 18, -top - (index - 1) * rowHeight)
+        place(row.clock, row, 0, -6, clockWidth)
+        place(row.elapsed, row, elapsedX, -6, elapsedWidth)
+        Compat.SetSize(row.icon, iconSize, iconSize)
+        place(row.icon, row, iconX, -2)
+        place(row.item, row, itemX, -6, itemWidth)
+        place(row.quantity, row, quantityX, -6, quantityWidth)
+        place(row.percent, row, percentX, -6, percentWidth)
+        place(row.vendor, row, vendorX, -6, vendorWidth)
+        place(row.processing, row, processingX, -6, processingWidth)
+        -- Narrow columns must clip long names instead of wrapping into the
+        -- next loot row; the full item remains available in its tooltip.
+        for _, text in ipairs({row.clock, row.elapsed, row.item, row.quantity, row.percent, row.vendor, row.processing}) do
+            text:SetHeight(math.max(1, rowHeight - 8))
+        end
+    end
+    self.scrollbar:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -16, -171)
+    self.scrollbar:SetHeight(self.visibleRows * rowHeight)
+    place(self.selectionText, frame, 18, -height + 82, math.max(260, width - 350))
+    self.selectionText:SetHeight(18 * textScale)
+    place(self.autoTextButton, frame, width - 304, -height + 88, 146)
+    place(self.lockButton, frame, width - 150, -height + 88, 132)
+    place(self.markButton, frame, 18, -height + 57, 130)
+    place(self.unmarkButton, frame, 158, -height + 57, 130)
+    place(self.deHint, frame, 302, -height + 50, width - 320)
+    place(self.footer, frame, 18, -height + 28, width - 55)
+    self.autoTextButton:SetText(settings.autoText and "Auto text: ON" or "Auto text: OFF")
+    self.lockButton:SetText(settings.locked and "Size: LOCKED" or "Size: UNLOCKED")
+    if frame.SetResizable then frame:SetResizable(not settings.locked) end
+    if settings.locked then self.resizeGrip:Hide() else self.resizeGrip:Show() end
+    self.layouting = false
+    self:Refresh()
+end
+
+function App:SetAutoText(enabled)
+    self.db.ui.autoText = enabled == true
+    self:Layout()
+end
+
+function App:SetSizeLocked(locked)
+    self.db.ui.locked = locked == true
+    if self.isResizing then
+        self.frame:StopMovingOrSizing()
+        self.isResizing = false
+    end
+    self:Layout()
+end
+
+function App:Resize(width, height)
+    if not self.frame then return end
+    width = math.max(MIN_WIDTH, math.min(MAX_WIDTH, tonumber(width) or self.frame:GetWidth()))
+    height = math.max(MIN_HEIGHT, math.min(MAX_HEIGHT, tonumber(height) or self.frame:GetHeight()))
+    self.layouting = true
+    Compat.SetSize(self.frame, width, height)
+    self.layouting = false
+    self:Layout()
+end
+
 function App:CreateWindow()
-    local frame = movableFrame("ClassicLootLogFrame", 900, 590, "Classic Loot Log")
+    self.db.ui = self.db.ui or { width = 900, height = 590, autoText = true, locked = false }
+    local settings = self.db.ui
+    self.fonts = {}
+    activeFontGroup = self.fonts
+    local frame = movableFrame("ClassicLootLogFrame", settings.width or 900, settings.height or 590, "Classic Loot Log")
     self.frame = frame
-    button(frame, "Reset", 90, 18, -54, function() self:RequestReset() end)
-    button(frame, "Export log", 140, 116, -54, function() self:ShowExport() end)
-    self.timerButton = button(frame, "Timer: OFF", 120, 264, -54, function()
+    if frame.SetMinResize then frame:SetMinResize(MIN_WIDTH, MIN_HEIGHT) end
+    if frame.SetMaxResize then frame:SetMaxResize(MAX_WIDTH, MAX_HEIGHT) end
+    self.resetButton = button(frame, "Reset", 84, 18, -54, function() self:RequestReset() end)
+    self.exportButton = button(frame, "Export log", 106, 108, -54, function() self:ShowExport() end)
+    self.timerButton = button(frame, "Timer: OFF", 106, 220, -54, function()
         self:SetTimer(not self.db.timer.enabled)
     end)
-    self.timerText = label(frame, "", 404, -61, 340)
-    self.viewButton = button(frame, "Item shares", 145, 737, -54, function()
+    self.timerText = label(frame, "", 340, -61, 190)
+    self.viewButton = button(frame, "Item shares", 115, 737, -54, function()
         self:SetView(self.view == "stats" and "loot" or "stats")
     end)
     self.mobText = label(frame, "", 18, -94, 860, "GameFontNormal")
     self.status = label(frame, "", 18, -119, 860)
-    label(frame, "Time", 18, -149, 70, "GameFontNormal")
-    label(frame, "Timer", 100, -149, 80, "GameFontNormal")
-    label(frame, "Loot", 202, -149, 350, "GameFontNormal")
-    label(frame, "Qty", 574, -149, 60, "GameFontNormal")
-    label(frame, "% items", 646, -149, 75, "GameFontNormal")
-    label(frame, "Processing", 742, -149, 110, "GameFontNormal")
+    self.headers = {
+        clock = label(frame, "Time", 18, -149, 70, "GameFontNormal"),
+        elapsed = label(frame, "Timer", 100, -149, 80, "GameFontNormal"),
+        item = label(frame, "Loot", 202, -149, 340, "GameFontNormal"),
+        quantity = label(frame, "Qty", 574, -149, 40, "GameFontNormal"),
+        percent = label(frame, "% items", 646, -149, 55, "GameFontNormal"),
+        vendor = label(frame, "Vendor", 700, -149, 100, "GameFontNormal"),
+        processing = label(frame, "Processing", 800, -149, 90, "GameFontNormal"),
+    }
     self.empty = label(frame, "", 22, -187, 830)
     self.rows = {}
-    for index = 1, ROWS do
+    for index = 1, MAX_ROWS do
         local row = CreateFrame("Button", nil, frame)
-        Compat.SetSize(row, 844, ROW_HEIGHT)
-        row:SetPoint("TOPLEFT", frame, "TOPLEFT", 18, -170 - (index - 1) * ROW_HEIGHT)
         row.clock = label(row, "", 0, -6, 75)
         row.elapsed = label(row, "", 82, -6, 80)
         row.icon = row:CreateTexture(nil, "ARTWORK")
-        Compat.SetSize(row.icon, 20, 20)
-        row.icon:SetPoint("TOPLEFT", row, "TOPLEFT", 158, -2)
-        row.item = label(row, "", 184, -6, 350)
-        row.quantity = label(row, "", 556, -6, 58)
-        row.percent = label(row, "", 628, -6, 75)
-        row.processing = label(row, "", 724, -6, 110)
+        row.item = label(row, "", 184, -6, 340)
+        row.quantity = label(row, "", 556, -6, 40)
+        row.percent = label(row, "", 628, -6, 55)
+        row.vendor = label(row, "", 700, -6, 100)
+        row.processing = label(row, "", 800, -6, 90)
         Compat.SetScript(row, "OnEnter", function(control)
             if control.entry and control.entry.link and control.entry.link ~= "" then
                 GameTooltip:SetOwner(control, "ANCHOR_RIGHT")
@@ -278,13 +429,10 @@ function App:CreateWindow()
         self.rows[index] = row
     end
     local slider = CreateFrame("Slider", nil, frame)
-    slider:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -16, -171)
     Compat.SetSize(slider, 14, ROWS * ROW_HEIGHT)
     slider:SetOrientation("VERTICAL")
     slider:SetMinMaxValues(0, 0)
     slider:SetValueStep(1)
-    -- OnValueChanged rounds to complete rows on every client. No newer
-    -- slider API is needed to keep drag scrolling aligned with the list.
     slider:SetThumbTexture("Interface\\Buttons\\UI-ScrollBar-Knob")
     Compat.SetScript(slider, "OnValueChanged", function(_, value)
         local offset = math.floor(value + 0.5)
@@ -298,15 +446,46 @@ function App:CreateWindow()
     Compat.SetScript(frame, "OnMouseWheel", function(_, delta)
         local stats = self.view == "stats" and Core.ItemStats(self.db)
         local count = stats and (table.getn(stats.rows) + table.getn(stats.materialRows)) or table.getn(self.db.entries)
-        local maxOffset = math.max(0, count - ROWS)
+        local maxOffset = math.max(0, count - (self.visibleRows or ROWS))
         self.offset = math.max(0, math.min(maxOffset, (self.offset or 0) - delta * 3))
         self:Refresh()
     end)
-    self.selectionText = label(frame, "", 18, -508, 860)
+    self.selectionText = label(frame, "", 18, -508, 550)
+    self.autoTextButton = button(frame, "Auto text: ON", 146, 596, -502, function()
+        self:SetAutoText(not self.db.ui.autoText)
+    end)
+    self.lockButton = button(frame, "Size: UNLOCKED", 132, 750, -502, function()
+        self:SetSizeLocked(not self.db.ui.locked)
+    end)
     self.markButton = button(frame, "Disenchanted +1", 130, 18, -533, function() self:MarkSelectedDisenchanted(1) end)
     self.unmarkButton = button(frame, "Undo DE -1", 130, 158, -533, function() self:UnmarkSelectedDisenchanted(1) end)
-    label(frame, "Disenchanting is detected when possible. Use these buttons for corrections.", 302, -540, 575)
-    label(frame, "Mobs/hour uses timed kills. Item % = item quantity / all original items.", 18, -570, 860)
+    self.deHint = label(frame, "Use the DE buttons to correct marked items.", 302, -540, 575)
+    self.footer = label(frame, "Mobs/hour uses timed kills. Item % uses original items. Drag the lower-right corner to resize.", 18, -570, 845)
+    local grip = CreateFrame("Button", nil, frame)
+    Compat.SetSize(grip, 20, 20)
+    grip:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -6, 6)
+    grip:EnableMouse(true)
+    local gripTexture = grip:CreateTexture(nil, "ARTWORK")
+    gripTexture:SetTexture("Interface\\ChatFrame\\UI-ChatIM-SizeGrabber-Up")
+    gripTexture:SetAllPoints(grip)
+    Compat.SetScript(grip, "OnMouseDown", function(_, mouseButton)
+        if (not mouseButton or mouseButton == "LeftButton") and not self.db.ui.locked and frame.StartSizing then
+            self.isResizing = true
+            frame:StartSizing("BOTTOMRIGHT")
+        end
+    end)
+    Compat.SetScript(grip, "OnMouseUp", function()
+        frame:StopMovingOrSizing()
+        self.isResizing = false
+        self:Layout()
+    end)
+    self.resizeGrip = grip
+    Compat.SetScript(frame, "OnSizeChanged", function()
+        self:Layout()
+    end)
+    Compat.SetScript(frame, "OnHide", function()
+        if self.isResizing then frame:StopMovingOrSizing(); self.isResizing = false end
+    end)
     local updateElapsed = 0
     Compat.SetScript(frame, "OnUpdate", function(_, elapsed)
         updateElapsed = updateElapsed + elapsed
@@ -315,6 +494,8 @@ function App:CreateWindow()
             self:UpdateSessionStats()
         end
     end)
+    activeFontGroup = nil
+    self:Layout()
 end
 
 function App:Toggle()
@@ -378,8 +559,12 @@ function App:CaptureLoot()
             slot.sources = { { guid = lootSession, quantity = slot.quantity } }
         end
     end
+    local firstNewEntry = table.getn(self.db.entries) + 1
     local added = Core.AddSnapshot(self.db, slots, time(), now())
-    if added > 0 then self:Refresh() end
+    if added > 0 then
+        Value.NotifyEntries(self.db, firstNewEntry)
+        self:Refresh()
+    end
     return complete
 end
 
@@ -396,6 +581,7 @@ function App:Initialize()
     if self.db then return end
     ClassicLootLogDB = Core.Initialize(ClassicLootLogDB, now())
     self.db = ClassicLootLogDB
+    Value.Initialize(self.db)
     self.tracker = Tracker.New({
         includeGroup = true,
         now = now,
@@ -441,7 +627,33 @@ function App:Initialize()
             elseif argument == "off" or argument == "uit" then self:SetTimer(false)
             elseif argument == "" then self:SetTimer(not self.db.timer.enabled)
             else say("Usage: /cll timer [on|off].") end
-        else say("Commands: /cll, /cll stats, /cll reset, /cll log, /cll timer [on|off].") end
+        elseif command == "price" then
+            local start, finish, item, amount = string.find(argument, "^(%d+)%s+(%S+)$")
+            if item and amount == "clear" and Value.ClearPrice(self.db, tonumber(item)) then
+                say("Automatic vendor pricing restored for item " .. item .. ".")
+                self:Refresh()
+            elseif item and Value.SetPrice(self.db, tonumber(item), tonumber(amount)) then
+                say("Vendor price for item " .. item .. ": " .. Value.FormatMoney(tonumber(amount)) .. " each.")
+                self:Refresh()
+            else say("Usage: /cll price <item ID> <copper per item|clear>.") end
+        elseif command == "epic" or command == "sound" then
+            local key = command == "epic" and "epic" or "sound"
+            local enabled = toggleArgument(argument, self.db.alerts[key])
+            if enabled == nil then
+                say("Usage: /cll " .. command .. " [on|off].")
+            else
+                self.db.alerts[key] = enabled
+                say((command == "epic" and "Epic alerts: " or "Alert sound: ") .. (enabled and "ON" or "OFF"))
+            end
+        elseif command == "scale" or command == "lock" then
+            local current = self.db.ui.locked
+            if command == "scale" then current = self.db.ui.autoText end
+            local enabled = toggleArgument(argument, current)
+            if enabled == nil then
+                say("Usage: /cll " .. command .. " [on|off].")
+            elseif command == "scale" then self:SetAutoText(enabled)
+            else self:SetSizeLocked(enabled) end
+        else say("Commands: /cll, stats, reset, log, timer, scale, lock, price, epic, sound.") end
     end
     say("Loaded. Type /cll to open the loot list.")
 end
@@ -468,7 +680,19 @@ Compat.SetScript(eventFrame, "OnEvent", function(_, event, a, b, c, d)
     if App.tracker then App.tracker:HandleEvent(event, a, b, c, d) end
     if event == "ADDON_LOADED" then
         local name = a
-        if name == addonName then App:Initialize() end
+        if name == addonName or name == launcherAddonName then
+            if App.db then
+                -- Loading a second addon folder can replace a SavedVariables
+                -- global. Keep the existing live database and event handlers.
+                ClassicLootLogDB = App.db
+                if App.loadedAddon ~= name then
+                    say("Two addon copies are enabled. Keep one copy enabled to use a single saved history.")
+                end
+            else
+                App.loadedAddon = name
+                App:Initialize()
+            end
+        end
     elseif event == "PLAYER_LOGOUT" then
         if App.db then Core.CheckpointTimer(App.db, now()) end
     elseif event == "LOOT_CLOSED" then

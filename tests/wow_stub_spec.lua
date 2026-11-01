@@ -4,6 +4,7 @@ ClassicLootLogNS = ns
 local clock, stamp, slots = 100, 1700000000, {}
 local popup, chat = nil, {}
 local combatLog, bags = {}, {}
+local notices, vendorPrices = {}, {}
 
 local Widget = {}
 local noops = {}
@@ -23,7 +24,7 @@ end
 local function widget(kind, name, parent)
     local object = setmetatable({ kind = kind, name = name, parent = parent,
         scripts = {}, events = {}, shown = true, width = 600, height = 400,
-        text = "", checked = false, value = 0 }, Widget)
+        text = "", checked = false, value = 0, fontPath = "Fonts\\FRIZQT__.TTF", fontSize = 12, fontFlags = "" }, Widget)
     frames[#frames + 1] = object
     if name then _G[name] = object end
     if kind == "EditBox" then editBoxes[#editBoxes + 1] = object end
@@ -55,8 +56,29 @@ function Widget:IsShown() return self.shown end
 function Widget:IsVisible() return self.shown end
 function Widget:SetShown(value) if value then self:Show() else self:Hide() end end
 function Widget:SetSize(width, height) self.width, self.height = width, height end
-function Widget:SetWidth(width) self.width = width end
-function Widget:SetHeight(height) self.height = height end
+function Widget:SetWidth(width)
+    local changed = self.width ~= width
+    self.width = width
+    if changed and self.scripts.OnSizeChanged then self.scripts.OnSizeChanged(self, width, self.height) end
+end
+function Widget:SetHeight(height)
+    local changed = self.height ~= height
+    self.height = height
+    if changed and self.scripts.OnSizeChanged then self.scripts.OnSizeChanged(self, self.width, height) end
+end
+function Widget:SetPoint(point, relative, relativePoint, x, y)
+    self.anchor = { point, relative, relativePoint, x, y }
+end
+function Widget:ClearAllPoints() self.anchor = nil end
+function Widget:SetResizable(value) self.resizable = value end
+function Widget:SetMinResize(width, height) self.minWidth, self.minHeight = width, height end
+function Widget:SetMaxResize(width, height) self.maxWidth, self.maxHeight = width, height end
+function Widget:StartSizing(direction) self.sizing = direction end
+function Widget:StopMovingOrSizing() self.sizing = false end
+function Widget:GetFont() return self.fontPath, self.fontSize, self.fontFlags end
+function Widget:SetFont(path, size, flags) self.fontPath, self.fontSize, self.fontFlags = path, size, flags end
+function Widget:SetScale(scale) self.scale = scale end
+function Widget:GetScale() return self.scale or 1 end
 function Widget:GetWidth() return self.width end
 function Widget:GetHeight() return self.height end
 function Widget:SetText(text) self.text = text or "" end
@@ -77,8 +99,21 @@ function Widget:SetMinMaxValues(minimum, maximum) self.minimum, self.maximum = m
 function Widget:GetMinMaxValues() return self.minimum or 0, self.maximum or 1 end
 function Widget:GetName() return self.name end
 function Widget:GetParent() return self.parent end
-function Widget:CreateFontString(name) return widget("FontString", name, self) end
+function Widget:CreateFontString(name, layer, template)
+    local font = widget("FontString", name, self)
+    if template == "GameFontNormalLarge" then font.fontSize = 16 end
+    return font
+end
 function Widget:CreateTexture(name) return widget("Texture", name, self) end
+function Widget:GetFontString()
+    local font = rawget(self, "buttonFont")
+    if not font then
+        font = widget("FontString", nil, self)
+        self.buttonFont = font
+    end
+    return font
+end
+function Widget:SetAllPoints(relative) self.allPoints = relative end
 function Widget:GetVerticalScroll() return self.scroll or 0 end
 function Widget:SetVerticalScroll(value) self.scroll = value end
 function Widget:GetVerticalScrollRange() return 500 end
@@ -88,6 +123,7 @@ function Widget:SetHyperlink(value) self.hyperlink = value end
 UIParent = widget("Frame", "UIParent")
 GameTooltip = widget("GameTooltip", "GameTooltip")
 DEFAULT_CHAT_FRAME = { AddMessage = function(_, message) chat[#chat + 1] = message end }
+UIErrorsFrame = { AddMessage = function(_, message) notices[#notices + 1] = message end }
 UISpecialFrames, SlashCmdList, StaticPopupDialogs = {}, {}, {}
 BackdropTemplateMixin = {}
 ChatFontNormal = {}
@@ -106,6 +142,10 @@ function GetLootSlotInfo(index)
     return slot.icon, slot.name, slot.quantity, slot.currencyID, slot.quality, false, false
 end
 function GetLootSlotLink(index) return slots[index].link end
+function GetItemInfo(link)
+    local id = tostring(link):match("item:(%d+)") or tostring(link):match("^(%d+)$")
+    return "Test item", link, 1, 1, 1, "Miscellaneous", "Junk", 20, "", 134400, vendorPrices[tonumber(id)]
+end
 function GetLootSlotType(index) return slots[index].kind or LOOT_SLOT_ITEM end
 function GetLootSourceInfo(index) return unpack(slots[index].sources or {}) end
 function UnitGUID(unit)
@@ -178,6 +218,7 @@ end
 assert(loadfile("ClassicLootLog/Compat.lua"))()
 assert(loadfile("ClassicLootLog/Core.lua"))("ClassicLootLog", ns)
 assert(loadfile("ClassicLootLog/Tracking.lua"))("ClassicLootLog", ns)
+assert(loadfile("ClassicLootLog/Value.lua"))()
 assert(loadfile("ClassicLootLog/Main.lua"))("ClassicLootLog", ns)
 local passed = 0
 local function test(name, callback)
@@ -640,6 +681,157 @@ test("a failed disenchant does not mark items or misclassify a later corpse", fu
     equal(ClassicLootLogDB.entries[1].disenchanted, 0)
     equal(ClassicLootLogDB.entries[2].origin, "drop")
     equal(ns.Core.ItemStats(ClassicLootLogDB).totalQuantity, 3)
+end)
+
+test("resizing reflows columns and scales text while preserving saved window settings", function()
+    resetSession()
+    ns.App:SetSizeLocked(false)
+    ns.App:SetAutoText(true)
+    ns.App:Resize(900, 590)
+    local path, baselineFont = ns.App.rows[1].item:GetFont()
+    local baselineWidth = ns.App.rows[1].item:GetWidth()
+    equal(ns.App.visibleRows, 13)
+    ns.App:Resize(680, 430)
+    local _, smallFont = ns.App.rows[1].item:GetFont()
+    assert(smallFont < baselineFont, "automatic text must shrink with a narrower window")
+    assert(ns.App.rows[1].item:GetWidth() < baselineWidth, "item column must reflow")
+    assert(ns.App.visibleRows < 13)
+    equal(ClassicLootLogDB.ui.width, 680)
+    equal(ClassicLootLogDB.ui.height, 430)
+    ns.App:Resize(1280, 900)
+    local _, largeFont = ns.App.rows[1].item:GetFont()
+    assert(largeFont > baselineFont)
+    assert(ns.App.visibleRows > 13)
+    ns.App:Resize(10, 10)
+    equal(ns.App.frame:GetWidth(), 680)
+    equal(ns.App.frame:GetHeight(), 430)
+    ns.App:SetAutoText(false)
+    local _, fixedSmallFont = ns.App.rows[1].item:GetFont()
+    equal(fixedSmallFont, baselineFont)
+    ns.App:Resize(1280, 900)
+    local _, fixedLargeFont = ns.App.rows[1].item:GetFont()
+    equal(fixedLargeFont, baselineFont)
+    ns.Core.Initialize(ClassicLootLogDB, clock)
+    equal(ClassicLootLogDB.ui.width, 1280)
+    equal(ClassicLootLogDB.ui.height, 900)
+    equal(ClassicLootLogDB.ui.autoText, false)
+    SlashCmdList.CLASSICLOOTLOG("scale off")
+    equal(ClassicLootLogDB.ui.autoText, false, "explicit OFF must not act like a toggle")
+    ns.Core.Reset(ClassicLootLogDB, clock)
+    equal(ClassicLootLogDB.ui.width, 1280, "loot reset must preserve window dimensions")
+    equal(ClassicLootLogDB.ui.height, 900)
+    equal(ClassicLootLogDB.ui.autoText, false)
+    ns.App:SetAutoText(true)
+    ns.App:Resize(900, 590)
+end)
+
+test("size locking disables the resize grip and unlocking enables native drag sizing", function()
+    resetSession()
+    ns.App:SetSizeLocked(true)
+    SlashCmdList.CLASSICLOOTLOG("lock on")
+    equal(ClassicLootLogDB.ui.locked, true, "explicit ON must preserve an already locked state")
+    ns.Core.Initialize(ClassicLootLogDB, clock)
+    equal(ClassicLootLogDB.ui.locked, true, "size locking must survive saved-state initialization")
+    equal(ns.App.frame.resizable, false)
+    equal(ns.App.resizeGrip:IsShown(), false)
+    ns.App.frame.sizing = false
+    ns.App.resizeGrip.scripts.OnMouseDown(ns.App.resizeGrip, "LeftButton")
+    equal(ns.App.frame.sizing, false)
+    ns.App:SetSizeLocked(false)
+    equal(ns.App.frame.resizable, true)
+    equal(ns.App.resizeGrip:IsShown(), true)
+    ns.App.resizeGrip.scripts.OnMouseDown(ns.App.resizeGrip, "LeftButton")
+    equal(ns.App.frame.sizing, "BOTTOMRIGHT")
+    ns.App.resizeGrip.scripts.OnMouseUp(ns.App.resizeGrip, "LeftButton")
+    equal(ns.App.frame.sizing, false)
+    equal(ClassicLootLogDB.ui.locked, false)
+end)
+
+test("scrolling still reaches every record after growing or shrinking the visible row count", function()
+    resetSession()
+    slots = {}
+    for index = 1, 50 do slots[index] = item("Creature-resize-scroll-" .. index, 1) end
+    dispatch("LOOT_OPENED")
+    ns.App:Resize(900, 590)
+    ns.App.scrollbar:SetValue(50 - ns.App.visibleRows)
+    equal(ns.App.rows[ns.App.visibleRows].entry.id, 1)
+    ns.App:Resize(900, 900)
+    equal(ns.App.offset, 50 - ns.App.visibleRows, "offset must clamp when more rows become visible")
+    equal(ns.App.rows[ns.App.visibleRows].entry.id, 1)
+    ns.App:Resize(680, 430)
+    ns.App.scrollbar:SetValue(50 - ns.App.visibleRows)
+    equal(ns.App.rows[ns.App.visibleRows].entry.id, 1)
+    equal(rawget(ns.App.rows[ns.App.visibleRows + 1], "entry"), nil)
+    ns.App:Resize(900, 590)
+end)
+
+test("vendor column separates unknown and zero prices and excludes destroyed original units", function()
+    resetSession()
+    vendorPrices = {[2589] = 75, [2592] = 0}
+    ClassicLootLogDB.vendorPrices = {}
+    local zero = item("Creature-vendor-zero", 2)
+    zero.link, zero.name = "item:2592", "No value item"
+    local unknown = item("Creature-vendor-unknown", 1)
+    unknown.link, unknown.name = "item:15210", "Unknown sword"
+    slots = {item("Creature-vendor-cloth", 3), zero, unknown}
+    dispatch("LOOT_OPENED")
+    equal(ns.App.rows[1].vendor:GetText(), "Unknown")
+    equal(ns.App.rows[2].vendor:GetText(), "0c")
+    equal(ns.App.rows[3].vendor:GetText(), "2s 25c")
+    SlashCmdList.CLASSICLOOTLOG("price 15210 500")
+    equal(ns.App.rows[1].vendor:GetText(), "5s 0c")
+    ns.App:SelectEntry(1)
+    equal(ns.App:MarkSelectedDisenchanted(1), 1)
+    equal(ns.App.rows[3].vendor:GetText(), "1s 50c")
+    local totals = ns.Value.GetTotals(ClassicLootLogDB)
+    equal(totals.knownCopper, 650)
+    equal(totals.unknownUnits, 0)
+    vendorPrices = {}
+end)
+
+test("epic notifications fire only for new original purple drops and respect the alert switch", function()
+    resetSession()
+    ClassicLootLogDB.alerts.epic = true
+    local before = #notices
+    local epic = item("Creature-purple", 2)
+    epic.link, epic.name, epic.quality = "item:873", "Purple weapon", 4
+    local rare = item("Creature-blue", 1)
+    rare.quality = 3
+    local legendary = item("Creature-orange", 1)
+    legendary.quality = 5
+    slots = {epic, rare, legendary}
+    dispatch("LOOT_OPENED")
+    equal(#notices, before + 1)
+    assert(notices[#notices]:find("EPIC LOOT", 1, true))
+    assert(notices[#notices]:find("x2", 1, true))
+    dispatch("LOOT_CLOSED")
+    dispatch("LOOT_OPENED")
+    equal(#notices, before + 1, "reopening a corpse must not notify twice")
+    dispatch("LOOT_CLOSED")
+    ClassicLootLogDB.alerts.epic = false
+    epic = item("Creature-purple-muted", 1)
+    epic.quality = 4
+    slots = {epic}
+    dispatch("LOOT_OPENED")
+    equal(#notices, before + 1)
+    ClassicLootLogDB.alerts.epic = true
+    dispatch("LOOT_SLOT_CHANGED", 1)
+    equal(#notices, before + 1, "reenabling alerts must not replay muted drops")
+    dispatch("LOOT_CLOSED")
+    dispatch("UNIT_SPELLCAST_SENT", "player", "", "Cast-purple-material", 13262)
+    dispatch("UNIT_SPELLCAST_SUCCEEDED", "player", "Cast-purple-material", 13262)
+    epic = item("Item-purple-material", 1)
+    epic.quality = 4
+    slots = {epic}
+    dispatch("LOOT_OPENED")
+    equal(ClassicLootLogDB.entries[#ClassicLootLogDB.entries].origin, "disenchant")
+    equal(#notices, before + 1, "DE results are not original epic drops")
+    resetSession()
+    epic = item("Creature-purple-after-reset", 1)
+    epic.quality = 4
+    slots = {epic}
+    dispatch("LOOT_OPENED")
+    equal(#notices, before + 2, "resettable row IDs must not suppress fresh drops")
 end)
 
 print(string.format("%d WoW integration smoke tests passed", passed))
