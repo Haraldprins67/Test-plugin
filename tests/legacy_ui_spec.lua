@@ -95,7 +95,9 @@ function CreateFrame(kind, name, parent, template)
     end
     return widget(kind, name, parent, template)
 end
-function GetBuildInfo() return "1.12.1", "5875", "Sep 19 2006" end
+-- Private clients can report a custom version while retaining Vanilla APIs.
+-- In particular the slider below deliberately has no SetObeyStepOnDrag method.
+function GetBuildInfo() return "1.18.0", "OctoWoW custom build", "" end
 function GetTime() return clock end
 function time() return stamp end
 function date(pattern, value) return os.date(pattern, value or stamp) end
@@ -110,6 +112,11 @@ function LootSlotIsCoin(index) return slots[index].kind == "money" end
 function UnitExists(unit)
     if unit == "target" then return 1, targetGUID end
     if unit == "player" then return 1, "0x0000000000000001" end
+end
+-- A backported GUID helper does not imply modern loot or widget APIs.
+function UnitGUID(unit)
+    local exists, guid = UnitExists(unit)
+    return exists and guid or nil
 end
 function UnitName(unit) if unit == "target" then return "Forest Wolf" end; return "Testplayer" end
 function UnitIsDead(unit) return unit == "target" end
@@ -181,8 +188,9 @@ local function reset()
     slots = {}
 end
 
-test("full addon loads and initializes through Vanilla global event arguments", function()
+test("custom-version Octo client initializes without modern slider methods", function()
     equal(ns.Compat.IsLegacy, true)
+    equal(ns.Compat.ClientVersion, "1.18.0")
     dispatch("ADDON_LOADED", "DifferentAddon")
     equal(ClassicLootLogDB, nil)
     dispatch("ADDON_LOADED", "ClassicLootLog")

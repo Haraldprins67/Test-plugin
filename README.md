@@ -1,8 +1,8 @@
 # Classic Loot Log — OctoWoW
 
-**Version 1.2.0** targets **OctoWoW's WoW 1.12.1 / Lua 5.0 client** (`Interface: 11200`). It provides an English interface using the original WoW dialog background, decorative border, gold headings and standard buttons.
+**Version 1.2.1** targets **OctoWoW's WoW 1.12.1 / Lua 5.0 client** (`Interface: 11200`). It provides an English interface using the original WoW dialog background, decorative border, gold headings and standard buttons.
 
-**[Download ClassicLootLog-1.2.0-OctoWoW.zip](downloads/ClassicLootLog-1.2.0-OctoWoW.zip?raw=true)**
+**[Download ClassicLootLog-1.2.1-OctoWoW.zip](downloads/ClassicLootLog-1.2.1-OctoWoW.zip?raw=true)**
 
 ## Install or update
 
@@ -24,7 +24,9 @@ The earlier 1.1.0 package targeted Blizzard's modern Classic Era API and Lua 5.1
 Core.lua:1: unexpected symbol near '...'
 ```
 
-Version 1.2.0 uses Lua 5.0 syntax throughout all four addon files, a shared namespace that does not rely on chunk arguments, old-style event globals, legacy loot APIs, and a frame-based timer fallback. OctoWoW's optional GUID return from `UnitExists(unit)` is used when available; no Nampower installation is required by this addon.
+Version 1.2.1 removes the unsupported `SetObeyStepOnDrag` slider call entirely. Legacy client detection also checks the available loot APIs, so a custom/newer display version or a GUID backport does not select incompatible functions. This fixes the reported `Main.lua:286` startup error on modified OctoWoW clients.
+
+Version 1.2.1 uses Lua 5.0 syntax throughout all four addon files, a shared namespace that does not rely on chunk arguments, old-style event globals, legacy loot APIs, and a frame-based timer fallback. OctoWoW's optional GUID return from `UnitExists(unit)` is used when available; no Nampower installation is required by this addon.
 
 ## Controls
 

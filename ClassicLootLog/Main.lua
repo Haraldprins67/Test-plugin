@@ -283,7 +283,8 @@ function App:CreateWindow()
     slider:SetOrientation("VERTICAL")
     slider:SetMinMaxValues(0, 0)
     slider:SetValueStep(1)
-    if not Compat.IsLegacy then slider:SetObeyStepOnDrag(true) end
+    -- OnValueChanged rounds to complete rows on every client. No newer
+    -- slider API is needed to keep drag scrolling aligned with the list.
     slider:SetThumbTexture("Interface\\Buttons\\UI-ScrollBar-Knob")
     Compat.SetScript(slider, "OnValueChanged", function(_, value)
         local offset = math.floor(value + 0.5)

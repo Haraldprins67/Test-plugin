@@ -10,7 +10,7 @@ local noops = {}
 for method in ("SetPoint SetFrameStrata SetClampedToScreen SetMovable EnableMouse RegisterForDrag "
     .. "StartMoving StopMovingOrSizing SetBackdrop SetBackdropColor SetJustifyH SetTexture "
     .. "SetMultiLine SetAutoFocus SetFontObject SetMaxLetters UpdateScrollChildRect SetScrollChild "
-    .. "SetFocus ClearFocus HighlightText SetOwner SetOrientation SetValueStep SetObeyStepOnDrag "
+    .. "SetFocus ClearFocus HighlightText SetOwner SetOrientation SetValueStep "
     .. "SetThumbTexture EnableMouseWheel"):gmatch("%S+") do
     noops[method] = function() end
 end

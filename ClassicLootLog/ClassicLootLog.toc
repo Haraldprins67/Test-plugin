@@ -2,7 +2,7 @@
 ## Title: Classic Loot Log
 ## Notes: OctoWoW loot log, group mob counter, item shares and disenchant tracking.
 ## Author: Haraldprins67
-## Version: 1.2.0
+## Version: 1.2.1
 ## SavedVariablesPerCharacter: ClassicLootLogDB
 
 Compat.lua

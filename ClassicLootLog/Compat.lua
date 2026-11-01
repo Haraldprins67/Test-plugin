@@ -7,10 +7,13 @@ ns.Compat = Compat
 local getn = table.getn
 local version
 if GetBuildInfo then version = GetBuildInfo() end
-Compat.IsLegacy = type(version) == "string" and string.find(version, "^1%.12") ~= nil
-if version == nil then
-    Compat.IsLegacy = not UnitGUID and not CombatLogGetCurrentEventInfo
-end
+-- Private clients can report a newer/custom build while still exposing the
+-- Vanilla API. Prefer the available loot functions over that display label.
+local legacyVersion = type(version) == "string" and string.find(version, "^1%.12") ~= nil
+local modernLoot = type(GetLootSlotType) == "function"
+local legacyLoot = not modernLoot and (type(LootSlotIsItem) == "function" or type(LootSlotIsCoin) == "function")
+local missingModernAPIs = not modernLoot and type(UnitGUID) ~= "function" and type(CombatLogGetCurrentEventInfo) ~= "function"
+Compat.IsLegacy = legacyVersion or legacyLoot or missingModernAPIs
 Compat.ClientVersion = version or "unknown"
 
 function Compat.Match(value, pattern)

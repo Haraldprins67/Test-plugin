@@ -29,25 +29,58 @@ end
 
 function CreateFrame() return frame() end
 function GetTime() return clock end
-local function loadCompat(version)
+local function legacyAPIs()
+    UnitGUID, CombatLogGetCurrentEventInfo, GetLootSlotType = nil, nil, nil
+    LootSlotIsItem = function(slot) return slot == 1 end
+    LootSlotIsCoin = function(slot) return slot == 2 end
+end
+local function modernAPIs()
+    UnitGUID = function() return "Player-modern" end
+    CombatLogGetCurrentEventInfo = function() end
+    GetLootSlotType = function(slot) return slot == 1 and 1 or 2 end
+    LootSlotIsItem, LootSlotIsCoin = nil, nil
+end
+local function loadCompat(version, APIs)
+    if APIs == "legacy" then legacyAPIs()
+    elseif APIs == "modern" then modernAPIs() end
     ClassicLootLogNS = {}
     GetBuildInfo = function() return version end
     dofile("ClassicLootLog/Compat.lua")
     return ClassicLootLogNS.Compat
 end
 
-test("client version distinguishes vanilla from current Classic Era", function()
-    UnitGUID = nil
-    CombatLogGetCurrentEventInfo = nil
-    equal(loadCompat("1.12.1").IsLegacy, true)
-    equal(loadCompat("1.15.9").IsLegacy, false)
+test("client capabilities distinguish vanilla from current Classic Era", function()
+    equal(loadCompat("1.12.1", "legacy").IsLegacy, true)
+    equal(loadCompat("1.15.9", "modern").IsLegacy, false)
+    UnitGUID, CombatLogGetCurrentEventInfo, GetLootSlotType = nil, nil, nil
+    LootSlotIsItem, LootSlotIsCoin = nil, nil
     equal(loadCompat(nil).IsLegacy, true)
     UnitGUID = function() return "Player-modern" end
     equal(loadCompat(nil).IsLegacy, false)
 end)
 
+test("modified Octo version with a GUID shim still uses legacy loot APIs", function()
+    legacyAPIs()
+    UnitGUID = function() return "0xF130000001000001" end
+    local compat = loadCompat("1.18.0")
+    equal(compat.IsLegacy, true)
+    equal(compat.ClientVersion, "1.18.0")
+    GetLootSlotInfo = function() return "icon", "Item", 2, 3 end
+    local icon, name, quantity, quality = compat.GetLootSlotInfo(1)
+    equal(icon, "icon"); equal(name, "Item"); equal(quantity, 2); equal(quality, 3)
+    equal(compat.LootSlotType(1), 1)
+end)
+
+test("a nonempty custom version cannot supply missing modern combat APIs", function()
+    UnitGUID, CombatLogGetCurrentEventInfo, GetLootSlotType = nil, nil, nil
+    LootSlotIsItem, LootSlotIsCoin = nil, nil
+    equal(loadCompat("OctoWoW custom build").IsLegacy, true)
+    modernAPIs()
+    equal(loadCompat("OctoWoW custom build").IsLegacy, false)
+end)
+
 test("legacy script globals become normalized callback arguments", function()
-    local compat = loadCompat("1.12.1")
+    local compat = loadCompat("1.12.1", "legacy")
     local widget = frame()
     local seen = {}
     compat.SetScript(widget, "OnEvent", function(self, name, a, b, c)
@@ -72,7 +105,7 @@ test("legacy script globals become normalized callback arguments", function()
 end)
 
 test("modern explicit script parameters are preserved", function()
-    local compat = loadCompat("1.15.9")
+    local compat = loadCompat("1.15.9", "modern")
     local widget, observed = frame(), {}
     compat.SetScript(widget, "OnEvent", function(self, name, a, b, c, d)
         observed = { self, name, a, b, c, d }
@@ -86,7 +119,7 @@ test("modern explicit script parameters are preserved", function()
 end)
 
 test("legacy-safe sizing event registration and GUID access avoid newer APIs", function()
-    local compat = loadCompat("1.12.1")
+    local compat = loadCompat("1.12.1", "legacy")
     local widget = frame()
     compat.SetSize(widget, 700, 500)
     equal(widget.width, 700)
@@ -102,7 +135,7 @@ test("legacy-safe sizing event registration and GUID access avoid newer APIs", f
 end)
 
 test("loot adapters normalize quality slot type and source pairs", function()
-    local compat = loadCompat("1.12.1")
+    local compat = loadCompat("1.12.1", "legacy")
     GetLootSlotInfo = function() return "icon", "Item", 2, 3 end
     local icon, name, quantity, quality = compat.GetLootSlotInfo(1)
     equal(icon, "icon"); equal(name, "Item"); equal(quantity, 2); equal(quality, 3)
@@ -111,7 +144,7 @@ test("loot adapters normalize quality slot type and source pairs", function()
     LootSlotIsCoin = function(slot) return slot == 2 end
     equal(compat.LootSlotType(1), 1)
     equal(compat.LootSlotType(2), 2)
-    compat = loadCompat("1.15.9")
+    compat = loadCompat("1.15.9", "modern")
     GetLootSlotInfo = function() return "icon", "Item", 2, 0, 4 end
     icon, name, quantity, quality = compat.GetLootSlotInfo(1)
     equal(quality, 4)
@@ -126,7 +159,7 @@ end)
 
 test("deferred callbacks run on old OnUpdate and can enqueue another timer", function()
     C_Timer = nil
-    local compat = loadCompat("1.12.1")
+    local compat = loadCompat("1.12.1", "legacy")
     clock = 100
     local calls = 0
     compat.After(0.2, function()
@@ -155,7 +188,7 @@ test("deferred callbacks run on old OnUpdate and can enqueue another timer", fun
 end)
 
 test("chat link and tooltip helpers accept vanilla APIs", function()
-    local compat = loadCompat("1.12.1")
+    local compat = loadCompat("1.12.1", "legacy")
     IsModifiedClick, ChatEdit_InsertLink = nil, nil
     IsShiftKeyDown = function() return true end
     equal(compat.IsChatLinkModified(), true)
