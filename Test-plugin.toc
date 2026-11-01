@@ -1,8 +1,8 @@
 ## Interface: 11200
 ## Title: Classic Loot Log
-## Notes: Resizable loot log, SellValue prices, party and raid rolls, and EP/GP bid history for OctoWoW.
+## Notes: Loot tracking, compact /sl metrics, SellValue prices, raid rolls and complete log exports for OctoWoW.
 ## Author: Haraldprins67
-## Version: 1.4.0
+## Version: 1.5.0
 ## OptionalDeps: SellValue
 ## SavedVariablesPerCharacter: ClassicLootLogDB
 
@@ -12,4 +12,6 @@ ClassicLootLog\Tracking.lua
 ClassicLootLog\Value.lua
 ClassicLootLog\GroupLoot.lua
 ClassicLootLog\GroupEvents.lua
+ClassicLootLog\Mini.lua
+ClassicLootLog\FileExport.lua
 ClassicLootLog\Main.lua

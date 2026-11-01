@@ -9,17 +9,21 @@ local Core = ns.Core
 local Tracker = ns.Tracker
 local Value = ns.Value
 local GroupEvents = ns.GroupEvents
+local Mini = ns.Mini
+local FileExport = ns.FileExport
 local App = {}
 ns.App = App
 
 local COMMANDS = {
     {command = "/cll or /lootlog", description = "Open or close Classic Loot Log."},
+    {command = "/sl [show|hide]", description = "Toggle, show or hide the compact timer, kill count and mobs/hour window."},
     {command = "/cll show / hide", description = "Show or hide the main window."},
     {command = "/cll commands", description = "Open this command reference (also: /cll help)."},
     {command = "/cll group", description = "Open the party / raid loot tracker."},
     {command = "/cll stats", description = "Show item shares in the loot tab."},
     {command = "/cll reset", description = "Confirm clearing session loot, mobs and party / raid history."},
     {command = "/cll log", description = "Export the current tab; select another export with its buttons."},
+    {command = "/cll save", description = "Save all logs for the local Lootlogs exporter; a reload is needed without a file API."},
     {command = "/cll timer [on|off]", description = "Start, pause or toggle the session stopwatch."},
     {command = "/cll scale [on|off]", description = "Enable, disable or toggle automatic text scaling."},
     {command = "/cll lock [on|off]", description = "Lock, unlock or toggle window resizing."},
@@ -208,6 +212,7 @@ function App:UpdateSessionStats()
     local mobs = Core.MobStats(self.db, now())
     self.timerText:SetText("Session time: " .. Core.FormatElapsed(mobs.elapsed))
     self.mobText:SetText(string.format("Mobs: %d  |  Mobs/hour: %.1f  |  While timed: %d", mobs.total, mobs.perHour, mobs.timed))
+    if self.mini then self.mini:Refresh() end
 end
 
 function App:SetView(view)
@@ -515,14 +520,15 @@ function App:SetTimer(enabled)
     self:Refresh()
 end
 
-function App:ShowExport(mode)
+function App:ShowExport(mode, preparedText, preparedName)
     mode = mode or (self.tab == "group" and "group" or self.tab == "commands" and "commands" or "loot")
     if not self.exportFrame then
         local frame = movableFrame("ClassicLootLogExportFrame", 740, 470, "Export loot log")
         label(frame, "Ctrl+A, Ctrl+C: copy all text and save it outside WoW as .txt or .tsv.", 18, -52, 704)
         label(frame, "WoW also saves the full list on logout or /reload (SavedVariables).", 18, -74, 704)
+        frame.fileName = label(frame, "", 18, -96, 704)
         local scroll = CreateFrame("ScrollFrame", "ClassicLootLogExportScrollFrame", frame, "UIPanelScrollFrameTemplate")
-        scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 20, -104)
+        scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 20, -122)
         scroll:SetPoint("BOTTOMRIGHT", frame, "BOTTOMRIGHT", -42, 48)
         local edit = CreateFrame("EditBox", "ClassicLootLogExportEditBox", scroll)
         edit:SetMultiLine(true)
@@ -545,12 +551,17 @@ function App:ShowExport(mode)
         button(frame, "Statistics", 110, 280, -432, function() self:ShowExport("stats") end)
         button(frame, "Party / Raid", 110, 400, -432, function() self:ShowExport("group") end)
         button(frame, "Commands", 100, 520, -432, function() self:ShowExport("commands") end)
+        self.saveLogsButton = button(frame, "Save all", 90, 630, -432, function() self:SaveAllLogs() end)
         Compat.SetScript(frame, "OnHide", function() edit:ClearFocus() end)
         self.exportFrame = frame
     end
     self.exportFrame:Show()
     local exported
-    if mode == "group" then
+    if preparedText then
+        exported = preparedText
+    elseif mode == "all" then
+        exported = FileExport.BuildReport(self.db, self.groupAdapter.model, self:ExportOptions())
+    elseif mode == "group" then
         exported = self.groupAdapter.model:Export()
     elseif mode == "commands" then
         local lines = {"Command\tDescription"}
@@ -561,9 +572,37 @@ function App:ShowExport(mode)
     else
         exported = Value.AppendExportColumns(self.db, Core.Export(self.db, formatTimestamp))
     end
+    local name = preparedName or FileExport.FileName(self:ExportOptions())
+    self.exportFrame.fileName:SetText("File: " .. (name or "Unknown"))
     self.exportFrame.edit:SetText(exported)
     self.exportFrame.edit:SetFocus()
     self.exportFrame.edit:HighlightText()
+end
+
+function App:ExportOptions()
+    return {
+        timestamp = time(), clock = now(),
+        player = UnitName and UnitName("player") or "Unknown",
+        realm = GetRealmName and GetRealmName() or nil,
+    }
+end
+
+function App:SaveAllLogs()
+    local result, reason = FileExport.Save(self.db, self.groupAdapter.model, self:ExportOptions())
+    if not result then
+        say("Export could not be prepared: " .. tostring(reason))
+        return nil, reason
+    end
+    self:ShowExport("all", result.text, result.filename)
+    if result.queued then
+        say("All logs queued as " .. result.filename .. ". Use /reload after active rolls finish (or log out), then run the local Lootlogs exporter.")
+    elseif result.verified then
+        local source = result.pathVerified and result.path or ("the patch export area (" .. result.provider .. ")")
+        say("All logs verified in " .. source .. ". The local exporter copies them into Lootlogs as " .. result.filename .. ".")
+    else
+        say("Export requested but not verified. The copyable full report remains open.")
+    end
+    return result
 end
 
 function App:Layout()
@@ -905,6 +944,7 @@ function App:Initialize()
     ClassicLootLogDB = Core.Initialize(ClassicLootLogDB, now())
     self.db = ClassicLootLogDB
     Value.Initialize(self.db)
+    self.mini = Mini.New(self.db, {now = now})
     self.groupAdapter = GroupEvents.New(self.db, {
         now = now, time = time,
         onChange = function() self:Refresh() end,
@@ -942,6 +982,16 @@ function App:Initialize()
     self:Refresh()
     SLASH_CLASSICLOOTLOG1 = "/cll"
     SLASH_CLASSICLOOTLOG2 = "/lootlog"
+    SLASH_CLASSICLOOTLOGMINI1 = "/sl"
+    SlashCmdList.CLASSICLOOTLOGMINI = function(message)
+        local argument = string.lower(message or "")
+        argument = string.gsub(argument, "^%s+", "")
+        argument = string.gsub(argument, "%s+$", "")
+        if argument == "show" then self.mini:Show()
+        elseif argument == "hide" then self.mini:Hide()
+        elseif argument == "" then self.mini:Toggle()
+        else say("Usage: /sl [show|hide]. Timer controls: /cll timer [on|off].") end
+    end
     SlashCmdList.CLASSICLOOTLOG = function(message)
         local first, last, command, rawArgument = string.find(message or "", "^%s*(%S*)%s*(.-)%s*$")
         command = string.lower(command)
@@ -951,6 +1001,7 @@ function App:Initialize()
         elseif command == "hide" then self.frame:Hide()
         elseif command == "reset" then self:RequestReset()
         elseif command == "log" then self:ShowExport()
+        elseif command == "save" then self:SaveAllLogs()
         elseif command == "commands" or command == "help" then
             self:SetTab("commands"); self.frame:Show()
         elseif command == "group" or command == "raid" then

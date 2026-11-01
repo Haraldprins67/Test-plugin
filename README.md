@@ -1,8 +1,8 @@
 # Classic Loot Log — OctoWoW
 
-**Version 1.4.0** targets **OctoWoW's WoW 1.12.1 / Lua 5.0 client** (`Interface: 11200`). It provides an English interface using the original WoW dialog background, decorative border, gold headings and standard buttons.
+**Version 1.5.0** targets **OctoWoW's WoW 1.12.1 / Lua 5.0 client** (`Interface: 11200`). It provides an English interface using the original WoW dialog background, decorative border, gold headings and standard buttons.
 
-**[Download ClassicLootLog-1.4.0-OctoWoW.zip](downloads/ClassicLootLog-1.4.0-OctoWoW.zip?raw=true)**
+**[Download ClassicLootLog-1.5.0-OctoWoW.zip](downloads/ClassicLootLog-1.5.0-OctoWoW.zip?raw=true)**
 
 ## Install or update
 
@@ -41,6 +41,46 @@ Core.lua:1: unexpected symbol near '...'
 Version 1.2.1 removes the unsupported `SetObeyStepOnDrag` slider call entirely. Legacy client detection also checks the available loot APIs, so a custom/newer display version or a GUID backport does not select incompatible functions. This fixes the reported `Main.lua:286` startup error on modified OctoWoW clients.
 
 Version 1.2.1 uses Lua 5.0 syntax throughout the addon files, a shared namespace that does not rely on chunk arguments, old-style event globals, legacy loot APIs, and a frame-based timer fallback. OctoWoW's optional GUID return from `UnitExists(unit)` is used when available; no Nampower installation is required by this addon.
+
+## Compact `/sl` window
+
+Type **`/sl`** to show or hide a small movable window containing only **Mobs/hour**, **Time** and **Kills**. It uses the same stopwatch and counters as the full interface, and updates independently while the main window is closed. The total kill count includes paused kills; the hourly rate still uses only kills and time with the stopwatch running. A paused timer is labelled `(paused)`.
+
+Use `/sl show` or `/sl hide` for explicit control. Drag the panel to move it. Visibility is remembered per character. Timer controls remain `/cll timer on` and `/cll timer off`; resetting the session also resets the mini window's displayed values.
+
+## Save all logs to `Octowow/Lootlogs`
+
+Open **Export log** and click **Save all**, or use **`/cll save`**. This prepares one complete report containing all retained personal loot, item/vendor statistics, party/raid choices, rolls, bids, receipts, unresolved awards and observed mob kills. It includes rows outside the visible tab. The report and filename identify the logging character and the client-local export date/time:
+
+```text
+Octowow/Lootlogs/2026-11-01_03-22-15_YourCharacter.txt
+```
+
+Names are Windows-safe. Repeated exports in the same second receive a sequence suffix; existing different logs are not overwritten.
+
+### Local helper setup (Windows)
+
+The known Octo/SuperWoW file APIs are restricted to `CustomData` or `imports`. They do **not** grant the addon direct access to an arbitrary root `Lootlogs` folder. The supplied local helper copies the completed reports to the exact folder you requested.
+
+1. Have **Python 3.9 or newer** installed on your computer. Python is required only by the external helper, not by the addon itself.
+2. Double-click `START-LOOTLOG-EXPORTER.cmd` and leave its window open. Its location is:
+   - Manual ZIP: `Octowow/Interface/AddOns/ClassicLootLog/tools/START-LOOTLOG-EXPORTER.cmd`.
+   - Octo Launcher Git install: `Octowow/Interface/AddOns/Test-plugin/tools/START-LOOTLOG-EXPORTER.cmd`.
+3. The helper finds the game directory and creates or reuses **`Octowow/Lootlogs`**.
+4. Click **Save all** in-game. If a supported patch can write and read back its file, the helper picks it up immediately from the patch's allowed folder.
+5. If the addon says **queued**, use **`/reload`** or log out. Finish any active group rolls before reloading, because open tracking contexts are archived on reload. WoW then writes the pending report to SavedVariables, and the helper creates the requested text file. No specific patch is needed for this fallback.
+
+The helper reports the final `Saved:` path in its window. The in-game message distinguishes a verified patch export from a queued export; neither claims that a root file exists before the external helper copies it. A copyable complete report remains available in the export dialog.
+
+The helper does not run Lua, modify your SavedVariables, remove source files, send data over the network or install a startup service. It only reads this addon's completed export records and writes text files in `Lootlogs`. Existing user logs are preserved; processing the same export again does not create repeated copies. Queued records remain in SavedVariables so they can be recovered, including after a session reset; avoid repeatedly clicking Save all when one snapshot is sufficient.
+
+You can also run the helper directly:
+
+```sh
+python tools/lootlog_exporter.py --watch --game-dir "C:/Games/Octowow"
+```
+
+Use `--once` instead of `--watch` for a single scan. Stop watch mode with Ctrl+C or by closing its window. Python helpers and the Windows launcher are included under `ClassicLootLog/tools` in the manual package and under `tools` in the Git repository.
 
 ## Tabs and party / raid loot
 
@@ -92,7 +132,9 @@ The list records loot while the window is hidden and while the timer is paused. 
 
 | Command | Action |
 | --- | --- |
-| `/cll` or `/lootlog` | Toggle the window |
+| `/cll` or `/lootlog` | Toggle the main window |
+| `/sl` / `/sl show` / `/sl hide` | Toggle, show or hide the three-metric mini window |
+| `/cll save` | Prepare all logs for file export, independent of the selected tab |
 | `/cll show` / `/cll hide` | Show / hide the window |
 | `/cll stats` | Show item shares |
 | `/cll commands` or `/cll help` | Show the command reference |
@@ -175,7 +217,7 @@ Disenchanting by another player is not automatically linked to your recorded ori
 
 ## Log files and saved data
 
-Standard WoW addon APIs cannot write an arbitrary text file. Use **Export log** to copy the text into an external editor. Loot entries include date/time, session time, type, item, quantity, quality, source, item-link data, origin (`drop` or `disenchant`) and disenchant count. Export order is oldest first; embedded tabs and line breaks are escaped.
+Standard WoW addon APIs cannot write an arbitrary text file. Use **Export log** to copy text into an external editor, or **Save all** with the local helper described above to write dated files into `Lootlogs`. Loot entries include date/time, session time, type, item, quantity, quality, source, item-link data, origin (`drop` or `disenchant`) and disenchant count. Export order is oldest first; embedded tabs and line breaks are escaped.
 
 On logout or `/reload`, WoW writes the per-character database to:
 
@@ -189,7 +231,7 @@ There is no fixed history limit. Export and reset periodically during long sessi
 
 ## Development and validation
 
-WoW loads `Compat.lua`, `Core.lua`, `Tracking.lua`, `Value.lua`, `GroupLoot.lua`, `GroupEvents.lua` and `Main.lua` in that order. The manual and launcher TOCs reference the same files. No build or runtime dependencies are needed by the addon. Use the existing checkout in cloud tasks; they are already isolated and do not need extra Git worktrees.
+WoW loads `Compat.lua`, `Core.lua`, `Tracking.lua`, `Value.lua`, `GroupLoot.lua`, `GroupEvents.lua`, `Mini.lua`, `FileExport.lua` and `Main.lua` in that order. The manual and launcher TOCs reference the same files. No build or runtime dependencies are needed by the addon. Use the existing checkout in cloud tasks; they are already isolated and do not need extra Git worktrees.
 
 The Python test runner uses Lupa for Lua 5.1 regression tests:
 
@@ -220,3 +262,5 @@ In-game checks: open `/cll`, loot items and coins, reopen a partial corpse, paus
 Also test resizing small/large, locking the grip, toggling Auto text, retaining preferences after reload, known/unknown/zero vendor prices, a manual price override, a new purple drop and reopening that same loot without a repeated notice.
 
 For party/raid validation, test a native Need/Greed roll including a tied score, master-loot /roll with an explicitly focused item, case/punctuation variants of MIN/NEED/MAX followed by an actual receipt, and two identical simultaneous item links that must remain ambiguous. Verify that no chat or loot actions are sent by the tracker.
+
+For file-export validation, run the helper from your installed addon tools folder, export once through a supported native writer and once through the SavedVariables fallback, and verify that filenames contain the click time and player name. Test a second same-second export without overwriting the first. Confirm `/sl` still updates with the main window hidden.

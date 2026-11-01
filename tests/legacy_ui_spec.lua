@@ -229,6 +229,8 @@ assert(loadfile("ClassicLootLog/Tracking.lua"))()
 assert(loadfile("ClassicLootLog/Value.lua"))()
 assert(loadfile("ClassicLootLog/GroupLoot.lua"))()
 assert(loadfile("ClassicLootLog/GroupEvents.lua"))()
+assert(loadfile("ClassicLootLog/Mini.lua"))()
+assert(loadfile("ClassicLootLog/FileExport.lua"))()
 assert(loadfile("ClassicLootLog/Main.lua"))()
 local ns = ClassicLootLogNS
 local passed = 0
@@ -516,6 +518,99 @@ test("Vanilla master-loot slash rolls and EPGP bids retain method and receipt-co
     assert(string.find(ns.App.groupRows[1].bid:GetText(), "MIN", 1, true))
     ns.App:ShowExport("group")
     assert(string.find(ns.App.exportFrame.edit:GetText(), "Cara", 1, true))
+end)
+
+test("Vanilla slash sl toggles a separate three-metric view without opening the main frame", function()
+    reset()
+    ns.App.frame:Hide()
+    ns.App.mini:Hide()
+    equal(SLASH_CLASSICLOOTLOGMINI1, "/sl")
+    assert(type(SlashCmdList.CLASSICLOOTLOGMINI) == "function")
+    SlashCmdList.CLASSICLOOTLOGMINI("")
+    equal(ns.App.mini.frame:IsShown(), true)
+    equal(ns.App.frame:IsShown(), false)
+    equal(ClassicLootLogDB.ui.miniVisible, true)
+    local count = 0
+    for _, object in ipairs(frames) do
+        if rawget(object, "parent") == ns.App.mini.frame and object.kind == "FontString" then count = count + 1 end
+    end
+    equal(count, 3)
+    SlashCmdList.CLASSICLOOTLOGMINI("")
+    equal(ns.App.mini.frame:IsShown(), false)
+    equal(ClassicLootLogDB.ui.miniVisible, false)
+end)
+
+test("Vanilla mini window refreshes via global OnUpdate arguments while the full UI stays hidden", function()
+    reset()
+    clock = 5000
+    ns.App.frame:Hide()
+    ns.App.mini:Show()
+    SlashCmdList.CLASSICLOOTLOG("timer on")
+    ns.Core.RecordMobKill(ClassicLootLogDB, "mini-vanilla-timed", "Wolf", stamp, clock)
+    tick(60)
+    assert(string.find(ns.App.mini.mobsPerHour:GetText(), "60.0", 1, true))
+    assert(string.find(ns.App.mini.timer:GetText(), "00:01:00", 1, true))
+    equal(ns.App.mini.kills:GetText(), "Kills: 1")
+    SlashCmdList.CLASSICLOOTLOG("timer off")
+    ns.Core.RecordMobKill(ClassicLootLogDB, "mini-vanilla-paused", "Wolf", stamp, clock)
+    tick(60)
+    assert(string.find(ns.App.mini.mobsPerHour:GetText(), "60.0", 1, true))
+    assert(string.find(ns.App.mini.timer:GetText(), "paused", 1, true))
+    equal(ns.App.mini.kills:GetText(), "Kills: 2")
+    SlashCmdList.CLASSICLOOTLOG("reset")
+    popup.OnAccept()
+    tick(0.3)
+    equal(ns.App.mini.kills:GetText(), "Kills: 0")
+    assert(string.find(ns.App.mini.timer:GetText(), "00:00:00", 1, true))
+    equal(ns.App.frame:IsShown(), false)
+    equal(ns.App.mini.frame:IsShown(), true)
+    ns.App.mini:Hide()
+end)
+
+test("Vanilla save-all verifies patched ExportFile output and keeps the date time player filename", function()
+    reset()
+    stamp = 1700000000
+    targetGUID = "0xF13000000100E001"
+    slots = {item(2, 2589, "Export Linen")}
+    dispatch("LOOT_OPENED")
+    local context = ns.App.groupAdapter.model:StartItem(groupLink(18809, "Export Party Item"), "master", {select = true})
+    ns.App.groupAdapter.model:AddBid(context, "Bob", "NEED")
+    ns.App.groupAdapter.model:Award(context.link, "Bob", {contextID = context.id})
+    ns.App:SetTab("commands")
+    local files, written = {}, {}
+    WriteCustomFile, ReadCustomFile = nil, nil
+    ExportFile = function(path, contents)
+        files[path] = contents
+        written[table.getn(written) + 1] = path
+        -- A void writer is only considered verified after matching readback.
+    end
+    ImportFile = function(path) return files[path] end
+    ns.App:ShowExport()
+    assert(ns.App.saveLogsButton and ns.App.saveLogsButton:GetScript("OnClick"))
+    local saved = ns.App:SaveAllLogs()
+    assert(saved and saved.verified and not saved.queued)
+    equal(saved.provider, "ExportFile")
+    assert(string.find(saved.filename, "_Testplayer.txt", 1, true))
+    assert(string.find(saved.path, "imports", 1, true))
+    assert(string.find(saved.filename, "^%d%d%d%d%-%d%d%-%d%d_%d%d%-%d%d%-%d%d_"))
+    local report = files[written[1]]
+    assert(string.find(report, "Export Linen", 1, true))
+    assert(string.find(report, "Export Party Item", 1, true))
+    assert(string.find(report, "Bob", 1, true))
+    assert(string.find(report, "NEED", 1, true))
+    ExportFile, ImportFile = nil, nil
+end)
+
+test("Vanilla save-all without a patch persists a queue for the Lootlogs helper after reload", function()
+    reset()
+    WriteCustomFile, ReadCustomFile, ExportFile, ImportFile = nil, nil, nil, nil
+    local before = table.getn(ClassicLootLogDB.pendingFileExports or {})
+    local saved = ns.App:SaveAllLogs()
+    assert(saved and saved.queued and saved.needsReload)
+    equal(saved.verified, false)
+    equal(saved.provider, "SavedVariables")
+    equal(table.getn(ClassicLootLogDB.pendingFileExports), before + 1)
+    assert(string.find(ClassicLootLogDB.pendingFileExports[table.getn(ClassicLootLogDB.pendingFileExports)], "CLLEXPORT1:", 1, true))
 end)
 
 print(passed .. " legacy UI tests passed")

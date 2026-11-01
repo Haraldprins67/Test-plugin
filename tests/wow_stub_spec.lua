@@ -239,6 +239,8 @@ assert(loadfile("ClassicLootLog/Tracking.lua"))("ClassicLootLog", ns)
 assert(loadfile("ClassicLootLog/Value.lua"))()
 assert(loadfile("ClassicLootLog/GroupLoot.lua"))()
 assert(loadfile("ClassicLootLog/GroupEvents.lua"))()
+assert(loadfile("ClassicLootLog/Mini.lua"))()
+assert(loadfile("ClassicLootLog/FileExport.lua"))()
 assert(loadfile("ClassicLootLog/Main.lua"))("ClassicLootLog", ns)
 local passed = 0
 local function test(name, callback)
@@ -1039,6 +1041,121 @@ test("simultaneous identical item rolls keep ambiguous receipts unassigned", fun
     assert(not data.entries[1].recipient and not data.entries[2].recipient)
     ns.App:SetTab("group")
     assert(ns.App.groupStatus:GetText():lower():find("unassigned", 1, true))
+end)
+
+test("slash sl toggles only a compact three-metric window and remembers visibility", function()
+    resetSession()
+    ns.App.frame:Hide()
+    ns.App.mini:Hide()
+    equal(SLASH_CLASSICLOOTLOGMINI1, "/sl")
+    assert(type(SlashCmdList.CLASSICLOOTLOGMINI) == "function")
+    SlashCmdList.CLASSICLOOTLOGMINI("")
+    equal(ns.App.mini.frame:IsShown(), true)
+    equal(ns.App.frame:IsShown(), false, "opening the mini window must not open the full UI")
+    equal(ClassicLootLogDB.ui.miniVisible, true)
+    local count = 0
+    for _, object in ipairs(frames) do
+        if rawget(object, "parent") == ns.App.mini.frame and object.kind == "FontString" then count = count + 1 end
+    end
+    equal(count, 3, "the compact view has exactly three metric labels")
+    SlashCmdList.CLASSICLOOTLOGMINI("")
+    equal(ns.App.mini.frame:IsShown(), false)
+    equal(ClassicLootLogDB.ui.miniVisible, false)
+end)
+
+test("compact metrics keep updating while the main window is hidden and share pause reset state", function()
+    resetSession()
+    clock = 4000
+    ns.App.frame:Hide()
+    ns.App.mini:Show()
+    SlashCmdList.CLASSICLOOTLOG("timer on")
+    ns.Core.RecordMobKill(ClassicLootLogDB, "Creature-mini-timed", "Wolf", stamp, clock)
+    clock = 4060
+    ns.App.mini.frame.scripts.OnUpdate(ns.App.mini.frame, 0.3)
+    assert(ns.App.mini.mobsPerHour:GetText():find("60.0", 1, true))
+    assert(ns.App.mini.timer:GetText():find("00:01:00", 1, true))
+    assert(ns.App.mini.kills:GetText():find("1", 1, true))
+    SlashCmdList.CLASSICLOOTLOG("timer off")
+    ns.Core.RecordMobKill(ClassicLootLogDB, "Creature-mini-paused", "Wolf", stamp, clock)
+    clock = 4200
+    ns.App.mini.frame.scripts.OnUpdate(ns.App.mini.frame, 0.3)
+    assert(ns.App.mini.mobsPerHour:GetText():find("60.0", 1, true))
+    assert(ns.App.mini.timer:GetText():find("paused", 1, true))
+    assert(ns.App.mini.kills:GetText():find("2", 1, true))
+    SlashCmdList.CLASSICLOOTLOG("reset")
+    popup.definition.OnAccept()
+    ns.App.mini.frame.scripts.OnUpdate(ns.App.mini.frame, 0.3)
+    assert(ns.App.mini.mobsPerHour:GetText():find("0.0", 1, true))
+    assert(ns.App.mini.timer:GetText():find("00:00:00", 1, true))
+    equal(ns.App.mini.kills:GetText(), "Kills: 0")
+    equal(ns.App.mini.frame:IsShown(), true, "reset preserves mini-window visibility")
+    equal(ns.App.frame:IsShown(), false)
+    ns.App.mini:Hide()
+end)
+
+test("save-all button writes and verifies the complete character report rather than the visible tab", function()
+    resetSession()
+    stamp = 1700000000
+    local sword = item("Creature-file-sword", 1)
+    sword.link, sword.name = "|cff1eff00|Hitem:15210:0:0|h[Export Sword]|h|r", "Export Sword"
+    slots = { item("Creature-file-cloth", 3), sword }
+    dispatch("LOOT_OPENED")
+    local group = ns.App.groupAdapter.model:StartItem(groupLink(18809, "Export Raid Item"), "master", {select = true})
+    ns.App.groupAdapter.model:AddBid(group, "Alice", "MAX")
+    ns.App.groupAdapter.model:Award(group.link, "Alice", {contextID = group.id})
+    local open = ns.App.groupAdapter.model:StartItem(groupLink(18816, "Still Open Item"), "master")
+    ns.App:SetTab("commands")
+    local files, written = {}, {}
+    ExportFile, ImportFile = nil, nil
+    WriteCustomFile = function(path, contents)
+        files[path] = contents
+        written[#written + 1] = path
+        return true
+    end
+    ReadCustomFile = function(path) return files[path] end
+    ns.App:ShowExport()
+    assert(ns.App.saveLogsButton and ns.App.saveLogsButton:GetScript("OnClick"), "export dialog must provide a save-all button")
+    local result = ns.App:SaveAllLogs()
+    assert(result and result.verified and not result.queued)
+    equal(result.provider, "WriteCustomFile")
+    assert(result.filename:find("_Testspeler.txt", 1, true))
+    assert(result.filename:match("^%d%d%d%d%-%d%d%-%d%d_%d%d%-%d%d%-%d%d_"))
+    assert(result.path:find("CustomData", 1, true), "report the patch's actual destination, not root Lootlogs")
+    local report = files[written[1]]
+    assert(report:find("Export Sword", 1, true))
+    assert(report:find("Linnen doek", 1, true))
+    assert(report:find("Export Raid Item", 1, true))
+    assert(report:find("Alice", 1, true))
+    assert(report:find("MAX", 1, true))
+    assert(report:find("Testspeler", 1, true))
+    equal(open.state, "open", "building a report must not archive an ongoing bid")
+    local second = ns.App:SaveAllLogs()
+    assert(second and second.verified)
+    assert(second.filename ~= result.filename, "same-second exports must not overwrite one another")
+    assert(written[1] ~= written[2])
+    WriteCustomFile, ReadCustomFile = nil, nil
+end)
+
+test("missing or failed file APIs queue a reloadable report and never claim a verified write", function()
+    resetSession()
+    slots = { item("Creature-export-queued", 2) }
+    dispatch("LOOT_OPENED")
+    WriteCustomFile, ReadCustomFile, ExportFile, ImportFile = nil, nil, nil, nil
+    local before = #(ClassicLootLogDB.pendingFileExports or {})
+    local queued = ns.App:SaveAllLogs()
+    assert(queued and queued.queued and queued.needsReload)
+    equal(queued.verified, false)
+    equal(queued.provider, "SavedVariables")
+    equal(#ClassicLootLogDB.pendingFileExports, before + 1)
+    assert(ClassicLootLogDB.pendingFileExports[#ClassicLootLogDB.pendingFileExports]:find("CLLEXPORT1:", 1, true))
+    WriteCustomFile = function() return false end
+    ReadCustomFile = function() return nil end
+    local failed = ns.App:SaveAllLogs()
+    assert(failed and failed.queued)
+    equal(failed.verified, false)
+    assert(failed.writeError, "native failure remains visible alongside the queued fallback")
+    equal(#ClassicLootLogDB.pendingFileExports, before + 2)
+    WriteCustomFile, ReadCustomFile = nil, nil
 end)
 
 print(string.format("%d WoW integration smoke tests passed", passed))
