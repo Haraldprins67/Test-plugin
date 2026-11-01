@@ -1,8 +1,8 @@
 # Classic Loot Log — OctoWoW
 
-**Version 1.3.0** targets **OctoWoW's WoW 1.12.1 / Lua 5.0 client** (`Interface: 11200`). It provides an English interface using the original WoW dialog background, decorative border, gold headings and standard buttons.
+**Version 1.4.0** targets **OctoWoW's WoW 1.12.1 / Lua 5.0 client** (`Interface: 11200`). It provides an English interface using the original WoW dialog background, decorative border, gold headings and standard buttons.
 
-**[Download ClassicLootLog-1.3.0-OctoWoW.zip](downloads/ClassicLootLog-1.3.0-OctoWoW.zip?raw=true)**
+**[Download ClassicLootLog-1.4.0-OctoWoW.zip](downloads/ClassicLootLog-1.4.0-OctoWoW.zip?raw=true)**
 
 ## Install or update
 
@@ -42,6 +42,38 @@ Version 1.2.1 removes the unsupported `SetObeyStepOnDrag` slider call entirely. 
 
 Version 1.2.1 uses Lua 5.0 syntax throughout the addon files, a shared namespace that does not rely on chunk arguments, old-style event globals, legacy loot APIs, and a frame-based timer fallback. OctoWoW's optional GUID return from `UnitExists(unit)` is used when available; no Nampower installation is required by this addon.
 
+## Tabs and party / raid loot
+
+The main window has **Loot**, **Commands**, and **Party / Raid** tabs. **Commands** is a scrollable reference to every primary command and its arguments. The decorative title is now centered inside its header and retains that anchor while resizing.
+
+**Party / Raid** keeps an observed item history with the distribution method, recipient, winning EP/GP bid where available, and the two highest eligible rollers. Click an item to inspect every recorded Need/Greed/Pass choice, roll, bid and receipt. The detail area scrolls independently. **Export log → Party / Raid** exports the complete history, including unresolved receipts.
+
+### Group loot
+
+Native roll events identify individual roll windows. The tracker records Need, Greed and Pass messages plus the resulting rolls. Need outranks Greed, so the displayed **Highest eligible** is not necessarily the numerically largest Greed roll. The winner announcement is kept separately from the recipient confirmed by the loot receipt. A name marked `(roll)` is an observed roll winner whose item receipt has not yet been confirmed.
+
+Tied highest rolls are explicitly listed in the details. Standard rolls use range 1–100. A single custom range, such as 1–1000, can also show its top two. Different ranges are never compared as if they were equivalent; their leaders are shown separately in the details.
+
+### Master loot and manual /roll
+
+New original items in your master-loot window and linked party/raid item announcements can create tracking entries. Before people roll, select the relevant **open** entry in **Party / Raid**, or use `/cll track ITEMLINK`. You can also select a farming-loot row and click **Track selected loot** in the group tab. `/cll focus LOG_ID` focuses an existing open entry; `/cll end` closes the focus without inventing an award.
+
+When exactly one item is open, unlinked `/roll` messages can be associated with it. When several items are open, explicitly focus the correct one: a system `/roll` message contains no item ID. The log retains **Master loot** even if later bids classify the process as EP/GP. The tracker does not roll, choose Need/Greed or distribute items for anyone.
+
+### EP/GP-style chat bidding
+
+On a tracked non-group-roll item, the addon recognizes short **MIN**, **NEED** and **MAX** bids in party/raid channels. Recognition handles case, spaces, punctuation, repeated letters, common leetspeak, several accents and forms such as `minimum`/`maximum`. Examples include `NeEd`, `N.E.E.D`, `n e e d`, `n33d`, `MAX!` and `minimum`. Ordinary conversation such as `need healing` is deliberately rejected. Arbitrary spellings or server-specific bid protocols cannot be guaranteed.
+
+A linked bid can identify its item directly. Unlinked bids require an explicitly focused item or a single unambiguous open item. Bids from people outside the observed group roster are ignored. The latest recognized bid per player is retained. **The actual loot receipt determines the winner**: the log then records whether that recipient bid MIN, NEED or MAX. It does not assume that the largest label won, calculate EP/GP points, or replace an EP/GP management addon.
+
+This classification is inferred from the observed bidding workflow. It does not claim that an official EP/GP addon sent the message. Missing winner bids remain **Unknown**.
+
+### Observation limits
+
+Only messages and events delivered to your client are available. Chat filters or missed rolls can leave rankings incomplete. Two simultaneous identical item links cannot always be matched to a plain receipt; those receipts stay in **Unassigned** rather than being assigned to the newest item. If multiple items are open, focus the item before the unlinked rolls/bids begin. Looking at a closed history entry does not change an already open focus; the detail area shows the current unlinked-roll target.
+
+Open contexts restored after `/reload` are archived as unresolved, so new bids cannot silently attach to an old session. Confirmed history is retained. Reset clears both farming and party/raid histories, while preserving UI and pricing preferences.
+
 ## Controls
 
 | Control | Action |
@@ -63,6 +95,11 @@ The list records loot while the window is hidden and while the timer is paused. 
 | `/cll` or `/lootlog` | Toggle the window |
 | `/cll show` / `/cll hide` | Show / hide the window |
 | `/cll stats` | Show item shares |
+| `/cll commands` or `/cll help` | Show the command reference |
+| `/cll group` or `/cll raid` | Open the party / raid tracker |
+| `/cll track ITEMLINK` | Start/focus an item for master loot or EP/GP bidding |
+| `/cll focus LOG_ID` | Focus an existing open tracker entry |
+| `/cll end` | Close the focused entry without guessing its recipient |
 | `/cll reset` | Open reset confirmation |
 | `/cll log` | Open the export window |
 | `/cll timer` | Toggle the stopwatch |
@@ -84,9 +121,13 @@ With **Auto text: ON**, text scales from 80% to 130% of its original size based 
 
 The **Vendor** column estimates the remaining vendor value of each observed item entry. A known zero price displays `0c`; an unavailable price displays **Unknown**. Money and currencies display `-`. Values use gold/silver/copper, and the log export includes unit copper price, remaining copper value and remaining quantity. The Statistics export includes a known-value total and the number of remaining units whose price is unknown.
 
-Vanilla's standard `GetItemInfo` does not normally supply a sell price. Automatic prices are used only if the client supplies the sell-price return or an installed price library exposes `GetSellValue(itemID)`. There is no mandatory price-addon dependency and no guessed price table. A merchant's purchase price is never substituted for the amount you receive by selling.
+Vanilla's standard `GetItemInfo` does not normally supply a sell price. **SellValue integration:** if the optional **SellValue** addon is installed and enabled, this addon reads its real `SellValues["item:ID"]` database directly. Those values are copper **per item**, not a stack total. Live SellValue data takes precedence over automatic caches and native prices, while a manual `/cll price` override still takes priority. Both TOCs declare SellValue as an optional dependency; it is never required just to load Classic Loot Log.
 
-For a missing price, set a known value with `/cll price <item ID> <copper per unit>`. Item IDs are present in exported item-link data. For example, `/cll price 15210 500` sets your chosen price for item 15210 to 5 silver; this is a command example, not a verified database price. Clear an override with `/cll price 15210 clear`. Prices are cached per character.
+SellValue prices refresh when that addon loads, after visiting a merchant, and whenever the loot view is refreshed. Prices learned by SellValue for custom items are therefore usable here without copying or modifying its database. The integration was checked against [Improved SellValue for 1.12](https://github.com/anzz1/SellValue). Unsupported variants remain safely unknown.
+
+If SellValue has no value for an item, automatic prices can still come from the client's sell-price return or a compatible `GetSellValue(itemID)` library. There is no mandatory price-addon dependency and no guessed price table. A merchant's purchase price is never substituted for the amount you receive by selling.
+
+For a missing price, set a known value with `/cll price <item ID> <copper per unit>`. Item IDs are present in exported item-link data. For example, `/cll price 15210 500` sets your chosen price for item 15210 to 5 silver; this is a command example, not a verified database price. Clear an override with `/cll price 15210 clear`. Prices are cached per character. Existing unlabelled prices from version 1.3 are conservatively preserved as manual overrides because their original source was not stored; use `clear` for an item to resume live SellValue pricing.
 
 A disenchanted original contributes only its undestroyed units; the resulting materials contribute separately. Historical item-share percentages continue to use original quantities. Vendor figures are estimates for the observed loot history, **not current bag contents**: selling, trading or discarding items outside the tracked DE process does not reduce this estimate.
 
@@ -148,7 +189,7 @@ There is no fixed history limit. Export and reset periodically during long sessi
 
 ## Development and validation
 
-WoW loads `Compat.lua`, `Core.lua`, `Tracking.lua`, `Value.lua` and `Main.lua` in that order. The manual and launcher TOCs reference the same files. No build or runtime dependencies are needed by the addon. Use the existing checkout in cloud tasks; they are already isolated and do not need extra Git worktrees.
+WoW loads `Compat.lua`, `Core.lua`, `Tracking.lua`, `Value.lua`, `GroupLoot.lua`, `GroupEvents.lua` and `Main.lua` in that order. The manual and launcher TOCs reference the same files. No build or runtime dependencies are needed by the addon. Use the existing checkout in cloud tasks; they are already isolated and do not need extra Git worktrees.
 
 The Python test runner uses Lupa for Lua 5.1 regression tests:
 
@@ -177,3 +218,5 @@ python3 -m zipfile -c dist/ClassicLootLog.zip ClassicLootLog
 In-game checks: open `/cll`, loot items and coins, reopen a partial corpse, pause/resume the timer, observe personal/pet/group kills, check item shares, disenchant a logged item, cancel another cast, correct a DE mark, export both views, test tooltips/Shift-click, reload to check persistence, and confirm/cancel reset.
 
 Also test resizing small/large, locking the grip, toggling Auto text, retaining preferences after reload, known/unknown/zero vendor prices, a manual price override, a new purple drop and reopening that same loot without a repeated notice.
+
+For party/raid validation, test a native Need/Greed roll including a tied score, master-loot /roll with an explicitly focused item, case/punctuation variants of MIN/NEED/MAX followed by an actual receipt, and two identical simultaneous item links that must remain ambiguous. Verify that no chat or loot actions are sent by the tracker.

@@ -2,6 +2,9 @@
 local frames, chat, slots = {}, {}, {}
 local clock, stamp = 100, 1700000000
 local notices, vendorPrices = {}, {}
+local lootMethod, partyCount, raidCount = "freeforall", 0, 0
+local lootRolls = {}
+local groupNames = {player = "Testplayer", pet = "Testpet", party1 = "Alice", party2 = "Bob", party3 = "Cara"}
 local targetGUID, popup = "0xF130000001000001", nil
 local fire
 local Widget = {}
@@ -159,7 +162,13 @@ function UnitGUID(unit)
     local exists, guid = UnitExists(unit)
     return exists and guid or nil
 end
-function UnitName(unit) if unit == "target" then return "Forest Wolf" end; return "Testplayer" end
+function UnitName(unit)
+    if unit == "target" then return "Forest Wolf" end
+    if unit == "player" or unit == "pet" then return groupNames[unit] end
+    local first, last, party = string.find(unit or "", "^party(%d+)$")
+    if party and tonumber(party) <= partyCount then return groupNames[unit] end
+    return nil
+end
 function UnitIsDead(unit) return unit == "target" end
 function UnitIsPlayer(unit) return unit == "player" end
 function UnitCanAttack(first, second) return second == "target" end
@@ -168,8 +177,14 @@ function GetContainerNumSlots() return 0 end
 function GetContainerItemInfo() return nil end
 function GetContainerItemLink() return nil end
 function IsShiftKeyDown() return false end
-function GetNumPartyMembers() return 0 end
-function GetNumRaidMembers() return 0 end
+function GetNumPartyMembers() return partyCount end
+function GetNumRaidMembers() return raidCount end
+function GetLootMethod() return lootMethod, 0, 0 end
+function GetLootRollItemLink(rollID) return lootRolls[rollID] and lootRolls[rollID].link end
+function GetLootRollItemInfo(rollID)
+    local roll = lootRolls[rollID]
+    if roll then return "icon", roll.name, roll.quantity or 1, roll.quality or 4, false, true, true end
+end
 function StaticPopup_Show(name)
     assert(StaticPopupDialogs[name], "reset dialog must be registered")
     popup = StaticPopupDialogs[name]
@@ -212,6 +227,8 @@ assert(loadfile("ClassicLootLog/Compat.lua"))()
 assert(loadfile("ClassicLootLog/Core.lua"))()
 assert(loadfile("ClassicLootLog/Tracking.lua"))()
 assert(loadfile("ClassicLootLog/Value.lua"))()
+assert(loadfile("ClassicLootLog/GroupLoot.lua"))()
+assert(loadfile("ClassicLootLog/GroupEvents.lua"))()
 assert(loadfile("ClassicLootLog/Main.lua"))()
 local ns = ClassicLootLogNS
 local passed = 0
@@ -228,6 +245,8 @@ local function reset()
     ns.App:SetView("loot")
     if ClassicLootLogDB.timer.enabled then SlashCmdList.CLASSICLOOTLOG("timer off") end
     slots = {}
+    lootMethod, partyCount, raidCount = "freeforall", 0, 0
+    lootRolls = {}
 end
 
 test("custom-version Octo client initializes without modern slider methods", function()
@@ -404,6 +423,99 @@ test("Vanilla epic quality from the fourth loot return creates one purple-drop n
     dispatch("LOOT_OPENED")
     equal(table.getn(notices), before + 1)
     ClassicLootLogDB.alerts.epic = true
+end)
+
+
+local function groupLink(id, name)
+    return "|cffa335ee|Hitem:" .. id .. ":0:0:0|h[" .. name .. "]|h|r"
+end
+
+test("Vanilla title is anchored inside its header and the Commands tab lists slash commands", function()
+    reset()
+    local title, header = ns.App.frame.titleText, ns.App.frame.header
+    assert(header)
+    equal(title.anchor[1], "CENTER")
+    equal(title.anchor[2], header)
+    equal(title.anchor[3], "CENTER")
+    ns.App:Resize(680, 430)
+    equal(title.anchor[1], "CENTER")
+    equal(title.anchor[2], header)
+    ns.App:Resize(900, 590)
+    SlashCmdList.CLASSICLOOTLOG("commands")
+    equal(ns.App.tab, "commands")
+    local commands, text = ns.App:GetCommands(), ""
+    assert(table.getn(commands) >= 15)
+    for _, command in ipairs(commands) do
+        assert(command.command and command.description)
+        text = text .. command.command .. "\n"
+    end
+    assert(string.find(text, "/cll group", 1, true))
+    assert(string.find(text, "/cll track", 1, true))
+    assert(string.find(text, "/cll price", 1, true))
+    ns.App:SetView("loot")
+    equal(ns.App.tab, "loot")
+end)
+
+test("Vanilla group-loot messages populate need greed rankings and the actual loot recipient", function()
+    reset()
+    lootMethod, partyCount = "group", 3
+    local link = groupLink(18803, "Vanilla group epic")
+    lootRolls[901] = {link = link, name = "Vanilla group epic", quality = 4}
+    dispatch("START_LOOT_ROLL", 901, 60000)
+    dispatch("CHAT_MSG_LOOT", "Alice has selected Need for: " .. link)
+    dispatch("CHAT_MSG_LOOT", "Bob has selected Greed for: " .. link)
+    dispatch("CHAT_MSG_LOOT", "Cara has selected Need for: " .. link)
+    dispatch("CHAT_MSG_LOOT", "Need Roll - 91 for " .. link .. " by Alice")
+    dispatch("CHAT_MSG_LOOT", "Need Roll - 84 for " .. link .. " by Cara")
+    dispatch("CHAT_MSG_LOOT", "Greed Roll - 99 for " .. link .. " by Bob")
+    dispatch("CHAT_MSG_LOOT", "Alice receives loot: " .. link .. ".")
+    local entries = ClassicLootLogDB.groupLoot.entries
+    equal(table.getn(entries), 1)
+    local entry = entries[1]
+    equal(entry.recipient, "Alice")
+    equal(entry.distributionMethod, "group")
+    local rankings = ns.App.groupAdapter.model:Rankings(entry)
+    equal(rankings.highest.player, "Alice")
+    equal(rankings.highest.value, 91)
+    equal(rankings.second.player, "Cara")
+    equal(rankings.second.value, 84)
+    SlashCmdList.CLASSICLOOTLOG("group")
+    equal(ns.App.tab, "group")
+    assert(string.find(ns.App.groupRows[1].winner:GetText(), "Alice", 1, true))
+    assert(string.find(ns.App.groupRows[1].highest:GetText(), "91", 1, true))
+    assert(string.find(ns.App.groupRows[1].second:GetText(), "84", 1, true))
+end)
+
+test("Vanilla master-loot slash rolls and EPGP bids retain method and receipt-confirmed winner", function()
+    reset()
+    lootMethod, partyCount = "master", 3
+    local link = groupLink(18809, "Vanilla master epic")
+    local entry = ns.App.groupAdapter:BeginItem(link, "master")
+    ns.App:SelectGroupEntry(entry.id)
+    dispatch("CHAT_MSG_SYSTEM", "Alice rolls 61 (1-100)")
+    dispatch("CHAT_MSG_SYSTEM", "Bob rolls 89 (1-100)")
+    dispatch("CHAT_MSG_LOOT", "Bob receives loot: " .. link .. ".")
+    equal(entry.recipient, "Bob")
+    equal(entry.distributionMethod, "master")
+    local rankings = ns.App.groupAdapter.model:Rankings(entry)
+    equal(rankings.highest.player, "Bob")
+    equal(rankings.second.player, "Alice")
+    link = groupLink(18816, "Vanilla EPGP epic")
+    entry = ns.App.groupAdapter:BeginItem(link, "master")
+    ns.App:SelectGroupEntry(entry.id)
+    dispatch("CHAT_MSG_PARTY", "m.A.X!", "Alice")
+    dispatch("CHAT_MSG_PARTY", "n33d", "Bob")
+    dispatch("CHAT_MSG_PARTY", "m i n", "Cara")
+    dispatch("CHAT_MSG_LOOT", "Cara receives loot: " .. link .. ".")
+    equal(entry.method, "epgp")
+    equal(entry.distributionMethod, "master")
+    equal(entry.recipient, "Cara")
+    equal(entry.winnerBid, "MIN")
+    ns.App:SetTab("group")
+    assert(string.find(ns.App.groupRows[1].winner:GetText(), "Cara", 1, true))
+    assert(string.find(ns.App.groupRows[1].bid:GetText(), "MIN", 1, true))
+    ns.App:ShowExport("group")
+    assert(string.find(ns.App.exportFrame.edit:GetText(), "Cara", 1, true))
 end)
 
 print(passed .. " legacy UI tests passed")

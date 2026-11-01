@@ -93,6 +93,7 @@ function Core.Reset(db, now)
     db.timer.elapsed = 0
     db.timer.startedAt = db.timer.enabled and number(now) or nil
     db.mobs = { total = 0, timed = 0, seen = {}, kills = {} }
+    db.groupLoot = { entries = {}, unassigned = {}, nextID = 1 }
 end
 
 function Core.RecordMobKill(db, guid, name, timestamp, clock)

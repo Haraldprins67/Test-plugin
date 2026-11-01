@@ -8,8 +8,29 @@ local Compat = ns.Compat
 local Core = ns.Core
 local Tracker = ns.Tracker
 local Value = ns.Value
+local GroupEvents = ns.GroupEvents
 local App = {}
 ns.App = App
+
+local COMMANDS = {
+    {command = "/cll or /lootlog", description = "Open or close Classic Loot Log."},
+    {command = "/cll show / hide", description = "Show or hide the main window."},
+    {command = "/cll commands", description = "Open this command reference (also: /cll help)."},
+    {command = "/cll group", description = "Open the party / raid loot tracker."},
+    {command = "/cll stats", description = "Show item shares in the loot tab."},
+    {command = "/cll reset", description = "Confirm clearing session loot, mobs and party / raid history."},
+    {command = "/cll log", description = "Export the current tab; select another export with its buttons."},
+    {command = "/cll timer [on|off]", description = "Start, pause or toggle the session stopwatch."},
+    {command = "/cll scale [on|off]", description = "Enable, disable or toggle automatic text scaling."},
+    {command = "/cll lock [on|off]", description = "Lock, unlock or toggle window resizing."},
+    {command = "/cll price ID COPPER", description = "Set a manual vendor price per item, overriding SellValue."},
+    {command = "/cll price ID clear", description = "Remove an override and resume SellValue/client price lookup."},
+    {command = "/cll epic [on|off]", description = "Enable, disable or toggle purple-drop screen/chat notices."},
+    {command = "/cll sound [on|off]", description = "Enable, disable or toggle the optional epic-drop sound."},
+    {command = "/cll track ITEMLINK", description = "Start/focus a linked master-loot or EP/GP item before bids or /roll."},
+    {command = "/cll focus LOG_ID", description = "Focus an open party / raid item by its numbered log entry."},
+    {command = "/cll end", description = "Close the focused item without guessing a recipient."},
+}
 
 local ROWS = 13
 local MAX_ROWS = 30
@@ -100,7 +121,11 @@ local function movableFrame(name, width, height, title)
     header:SetTexture("Interface\\DialogFrame\\UI-DialogBox-Header")
     Compat.SetSize(header, 360, 64)
     header:SetPoint("TOP", frame, "TOP", 0, 12)
-    local titleText = label(frame, title, (width - 320) / 2, -14, 320, "GameFontNormalLarge")
+    frame.header = header
+    local titleText = label(frame, title, 0, 0, 320, "GameFontNormalLarge")
+    titleText:ClearAllPoints()
+    titleText:SetPoint("CENTER", header, "CENTER", 0, 8)
+    titleText:SetHeight(24)
     titleText:SetJustifyH("CENTER")
     frame.titleText = titleText
     local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
@@ -116,6 +141,9 @@ end
 
 function App:Refresh()
     if not self.frame then return end
+    self:UpdateTabControls()
+    if self.tab == "commands" then self:RefreshCommands(); return end
+    if self.tab == "group" then self:RefreshGroup(); return end
     local db = self.db
     local stats = Core.ItemStats(db)
     local percentages = {}
@@ -137,8 +165,8 @@ function App:Refresh()
     self.scrollbar:SetMinMaxValues(0, maxOffset)
     self.scrollbar:SetValue(self.offset)
     self.status:SetText(self.view == "stats"
-        and string.format("Item share: quantity / %d original items  |  %d DE materials (separate)", stats.totalQuantity, stats.totalMaterials)
-        or string.format("%d loot entries  |  Newest first  |  %d items disenchanted", count, stats.totalDisenchanted))
+        and string.format("Original: %d  |  DE materials: %d", stats.totalQuantity, stats.totalMaterials)
+        or string.format("%d loot entries  |  DE: %d", count, stats.totalDisenchanted))
     self.empty:SetText(count == 0 and "No items in this view yet. Open a loot window to record drops." or "")
     self.timerButton:SetText(db.timer.enabled and "Timer: ON" or "Timer: OFF")
     self.viewButton:SetText(self.view == "stats" and "Loot list" or "Item shares")
@@ -183,9 +211,275 @@ function App:UpdateSessionStats()
 end
 
 function App:SetView(view)
+    self.tab = "loot"
     self.view = view == "stats" and "stats" or "loot"
     self.offset = 0
     self:Refresh()
+end
+
+function App:GetCommands()
+    return COMMANDS
+end
+
+function App:SetTab(tab)
+    if tab ~= "commands" and tab ~= "group" then tab = "loot" end
+    self.tab, self.offset = tab, 0
+    self:Layout()
+end
+
+function App:UpdateTabControls()
+    local tab = self.tab or "loot"
+    local function visible(control, show)
+        if show then control:Show() else control:Hide() end
+    end
+    for key, control in pairs(self.tabButtons) do
+        if key == tab then control:Disable() else control:Enable() end
+    end
+    visible(self.commandsPanel, tab == "commands")
+    visible(self.groupPanel, tab == "group")
+    visible(self.viewButton, tab == "loot")
+    visible(self.empty, tab == "loot")
+    visible(self.selectionText, tab == "loot")
+    visible(self.markButton, tab == "loot")
+    visible(self.unmarkButton, tab == "loot")
+    visible(self.deHint, tab == "loot")
+    for _, header in pairs(self.headers) do visible(header, tab == "loot") end
+    if tab ~= "loot" then for _, row in ipairs(self.rows) do row:Hide() end end
+    self.footer:SetText(tab == "group"
+        and "Focus an item for unlinked bids or /roll. Need outranks Greed. A receipt confirms the recipient."
+        or tab == "commands" and "Optional arguments in [brackets] may be omitted to toggle a setting. Prices are copper per item."
+        or "Mobs/hour uses timed kills. Item % uses original items. Drag the lower-right corner to resize.")
+end
+
+function App:RefreshCommands()
+    local visible = self.commandVisibleRows or 1
+    self.offset = math.max(0, math.min(self.offset or 0, math.max(0, table.getn(COMMANDS) - visible)))
+    self.scrollbar:SetMinMaxValues(0, math.max(0, table.getn(COMMANDS) - visible))
+    self.scrollbar:SetValue(self.offset)
+    self.status:SetText(tostring(table.getn(COMMANDS)) .. " commands")
+    for index, row in ipairs(self.commandsRows) do
+        local entry = index <= visible and COMMANDS[self.offset + index] or nil
+        if entry then
+            row.command:SetText(entry.command)
+            row.description:SetText(entry.description)
+            row:Show()
+        else row:Hide() end
+    end
+    self:UpdateSessionStats()
+end
+
+local function methodLabel(entry, compact)
+    local distribution = entry.distributionMethod == "master" and "Master loot"
+        or entry.distributionMethod == "group" and "Group loot" or "Unknown"
+    if entry.method == "epgp" and compact then
+        return "EP/GP (" .. (entry.distributionMethod == "master" and "Master" or "Unknown") .. ")"
+    end
+    return entry.method == "epgp" and ("EP/GP / " .. distribution) or distribution
+end
+
+local function rollLabel(roll)
+    if not roll then return "-" end
+    return roll.player .. " " .. tostring(roll.value) .. (roll.choice ~= "ROLL" and (" " .. roll.choice) or "")
+end
+
+function App:SelectGroupEntry(id)
+    local entry = self.groupAdapter.model:Get(id)
+    if not entry then return false end
+    self.selectedGroupID = id
+    self.groupAdapter:Select(id)
+    self:Refresh()
+    return true
+end
+
+function App:BeginGroupItem(link)
+    if not link or link == "" then
+        for _, entry in ipairs(self.db.entries) do
+            if entry.id == self.selectedEntryID then link = entry.link; break end
+        end
+    end
+    if not link or link == "" or not string.find(link, "item:%d+") then
+        say("Select a loot item first, or use /cll track followed by its item link.")
+        return nil
+    end
+    local entry = self.groupAdapter:BeginItem(link)
+    if entry then
+        self.selectedGroupID = entry.id
+        self:SetTab("group")
+        self.frame:Show()
+    end
+    return entry
+end
+
+function App:EndGroupItem()
+    local entry = self.groupAdapter.model:GetActive()
+    if entry then
+        self.groupAdapter.model:Close(entry, "closed_by_user")
+        self:Refresh()
+    else say("Select an open party / raid item first.") end
+end
+
+function App:RefreshGroup()
+    local model = self.groupAdapter.model
+    local entries, unassigned = model:Entries(), model:GetUnassigned()
+    local visible = self.groupVisibleRows or 1
+    self.offset = math.max(0, math.min(self.offset or 0, math.max(0, table.getn(entries) - visible)))
+    self.scrollbar:SetMinMaxValues(0, math.max(0, table.getn(entries) - visible))
+    self.scrollbar:SetValue(self.offset)
+    self.groupStatus:SetText(string.format("%d items | Unassigned: %d", table.getn(entries), table.getn(unassigned)))
+    for index, row in ipairs(self.groupRows) do
+        local entry = index <= visible and entries[table.getn(entries) - self.offset - index + 1] or nil
+        row.entry = entry
+        if entry then
+            local ranks = model:Rankings(entry)
+            row.item:SetText("#" .. entry.id .. " " .. entry.link)
+            row.method:SetText(methodLabel(entry, true))
+            row.winner:SetText(entry.recipient or (entry.observedWinner and (entry.observedWinner .. " (roll)")) or "Pending")
+            row.highest:SetText(rollLabel(ranks.highest))
+            row.second:SetText(rollLabel(ranks.second))
+            row.bid:SetText(entry.winnerBid or "-")
+            row:Show()
+        else row:Hide() end
+    end
+    local entry = model:Get(self.selectedGroupID)
+    local lines = {}
+    if entry then
+        local ranks = model:Rankings(entry)
+        lines[1] = "#" .. entry.id .. " " .. entry.link .. " | " .. methodLabel(entry) .. " | " .. entry.state
+        lines[2] = "Recipient: " .. (entry.recipient or "Not confirmed") .. " | Winning bid: " .. (entry.winnerBid or "Unknown")
+        lines[3] = "Highest eligible: " .. rollLabel(ranks.highest) .. " | Second: " .. rollLabel(ranks.second)
+        local active = model:GetActive()
+        lines[table.getn(lines) + 1] = "Unlinked bids / /roll focus: " .. (active and ("#" .. active.id .. " " .. active.name) or "Only a unique open item; otherwise select an open item first.")
+        if ranks.mixedRanges then lines[table.getn(lines) + 1] = "Different /roll ranges are ranked separately:" end
+        if ranks.mixedRanges or (ranks.highest and (ranks.min ~= 1 or ranks.max ~= 100)) then
+            for _, range in ipairs(ranks.rangeGroups) do
+                lines[table.getn(lines) + 1] = "Range " .. range.min .. "-" .. range.max .. ": " .. rollLabel(range.highest) .. " | Second: " .. rollLabel(range.second)
+            end
+        end
+        if ranks.tied then lines[table.getn(lines) + 1] = "Tied highest: " .. table.concat(ranks.tiePlayers, ", ") end
+        if ranks.uncertain then lines[table.getn(lines) + 1] = "Some Need/Greed choices were not observed; ranking may be incomplete." end
+        for _, key in ipairs(entry.choiceOrder) do
+            local choice = entry.choices[key]
+            lines[table.getn(lines) + 1] = choice.player .. ": " .. choice.choice
+        end
+        for _, roll in ipairs(entry.rolls) do
+            lines[table.getn(lines) + 1] = roll.player .. ": " .. tostring(roll.value) .. " (" .. roll.min .. "-" .. roll.max .. ") " .. roll.choice
+        end
+        for _, key in ipairs(entry.bidOrder) do
+            local bid = entry.bids[key]
+            lines[table.getn(lines) + 1] = bid.player .. ": " .. bid.kind .. " | " .. bid.raw
+        end
+        if table.getn(entry.rolls) == 0 and table.getn(entry.bidOrder) == 0 then
+            lines[table.getn(lines) + 1] = "Waiting for observed rolls, bids or the loot receipt."
+        end
+    else
+        lines[1] = "Select an item above to inspect choices, all rolls and bids."
+        lines[2] = "Click Track selected loot or use /cll track ITEMLINK before unlinked /rolls or EP/GP bids."
+    end
+    if table.getn(unassigned) > 0 then
+        lines[table.getn(lines) + 1] = "Unassigned receipts (no unique matching item; see export):"
+        for _, receipt in ipairs(unassigned) do
+            lines[table.getn(lines) + 1] = (receipt.recipient or "Unknown") .. " received " .. receipt.link .. " | " .. (receipt.reason or "Unknown")
+        end
+    end
+    self.groupDetail:SetText(table.concat(lines, "\n"))
+    local detailHeight = math.max(110, table.getn(lines) * 32 * (self.textScale or 1))
+    self.groupDetail:SetHeight(detailHeight)
+    self.groupDetailChild:SetHeight(detailHeight)
+    self.groupDetailScroll:UpdateScrollChildRect()
+    self:UpdateSessionStats()
+end
+
+function App:CreateExtraTabs(frame)
+    self.tabButtons = {
+        loot = button(frame, "Loot", 90, 18, -112, function() self:SetTab("loot") end),
+        commands = button(frame, "Commands", 120, 116, -112, function() self:SetTab("commands") end),
+        group = button(frame, "Party / Raid", 140, 244, -112, function() self:SetTab("group") end),
+    }
+    self.commandsPanel = CreateFrame("Frame", nil, frame)
+    self.groupPanel = CreateFrame("Frame", nil, frame)
+    self.groupStatus = self.status
+    self.commandHeaders = {
+        command = label(self.commandsPanel, "Command", 18, -149, 220, "GameFontNormal"),
+        description = label(self.commandsPanel, "Description", 250, -149, 600, "GameFontNormal"),
+    }
+    self.commandsRows, self.groupRows, self.groupHeaders = {}, {}, {}
+    local headings = {item = "Item", method = "Method", winner = "Recipient", highest = "Highest eligible", second = "Second eligible", bid = "Bid"}
+    for key, text in pairs(headings) do self.groupHeaders[key] = label(self.groupPanel, text, 18, -149, 100, "GameFontNormal") end
+    for index = 1, MAX_ROWS do
+        local command = CreateFrame("Frame", nil, self.commandsPanel)
+        command.command = label(command, "", 0, -4, 220)
+        command.description = label(command, "", 230, -4, 600)
+        self.commandsRows[index] = command
+        local row = CreateFrame("Button", nil, self.groupPanel)
+        for key in pairs(headings) do row[key] = label(row, "", 0, -4, 100) end
+        Compat.SetScript(row, "OnClick", function(control)
+            if control.entry then self:SelectGroupEntry(control.entry.id) end
+        end)
+        Compat.SetScript(row, "OnEnter", function(control)
+            if control.entry then
+                GameTooltip:SetOwner(control, "ANCHOR_RIGHT")
+                Compat.TooltipItem(GameTooltip, control.entry.link)
+                GameTooltip:Show()
+            end
+        end)
+        Compat.SetScript(row, "OnLeave", function() GameTooltip:Hide() end)
+        self.groupRows[index] = row
+    end
+    self.groupDetailScroll = CreateFrame("ScrollFrame", "ClassicLootLogGroupDetailScroll", self.groupPanel, "UIPanelScrollFrameTemplate")
+    self.groupDetailChild = CreateFrame("Frame", nil, self.groupDetailScroll)
+    Compat.SetSize(self.groupDetailChild, 600, 110)
+    self.groupDetail = label(self.groupDetailChild, "", 0, 0, 800)
+    self.groupDetailScroll:SetScrollChild(self.groupDetailChild)
+    self.trackItemButton = button(self.groupPanel, "Track selected loot", 170, 18, -533, function() self:BeginGroupItem() end)
+    self.endItemButton = button(self.groupPanel, "Close focused item", 170, 198, -533, function() self:EndGroupItem() end)
+end
+
+function App:LayoutExtraTabs(width, height, scale, rowHeight)
+    for _, panel in ipairs({self.commandsPanel, self.groupPanel}) do
+        Compat.SetSize(panel, width, height)
+        panel:SetPoint("TOPLEFT", self.frame, "TOPLEFT", 0, 0)
+    end
+    local commandHeight = math.floor(38 * scale + 0.5)
+    self.commandVisibleRows = math.max(1, math.min(MAX_ROWS, math.floor((height - 265) / commandHeight)))
+    local commandWidth = math.min(250 * scale, width * 0.4)
+    place(self.commandHeaders.command, self.commandsPanel, 18, -149, commandWidth)
+    place(self.commandHeaders.description, self.commandsPanel, 32 + commandWidth, -149, width - commandWidth - 78)
+    for index, row in ipairs(self.commandsRows) do
+        Compat.SetSize(row, width - 56, commandHeight)
+        place(row, self.commandsPanel, 18, -170 - (index - 1) * commandHeight)
+        place(row.command, row, 0, -4, commandWidth)
+        place(row.description, row, commandWidth + 14, -4, width - commandWidth - 78)
+        row.command:SetHeight(commandHeight - 6)
+        row.description:SetHeight(commandHeight - 6)
+    end
+    self.groupVisibleRows = math.max(1, math.min(MAX_ROWS, math.floor((height - 400) / rowHeight)))
+    local usable = width - 56
+    local sizes = {method = 100 * scale, winner = 95 * scale, highest = 115 * scale, second = 115 * scale, bid = 45 * scale}
+    local itemWidth = usable - sizes.method - sizes.winner - sizes.highest - sizes.second - sizes.bid - 40
+    local positions = {item = 0, method = itemWidth + 8}
+    positions.winner = positions.method + sizes.method + 8
+    positions.highest = positions.winner + sizes.winner + 8
+    positions.second = positions.highest + sizes.highest + 8
+    positions.bid = positions.second + sizes.second + 8
+    sizes.item = itemWidth
+    for key, header in pairs(self.groupHeaders) do place(header, self.groupPanel, 18 + positions[key], -149, sizes[key]) end
+    for index, row in ipairs(self.groupRows) do
+        Compat.SetSize(row, usable, rowHeight)
+        place(row, self.groupPanel, 18, -170 - (index - 1) * rowHeight)
+        for key in pairs(self.groupHeaders) do
+            place(row[key], row, positions[key], -4, sizes[key])
+            row[key]:SetHeight(math.max(1, rowHeight - 6))
+        end
+    end
+    self.groupDetailScroll:SetPoint("TOPLEFT", self.groupPanel, "TOPLEFT", 20, -178 - self.groupVisibleRows * rowHeight)
+    self.groupDetailScroll:SetPoint("BOTTOMRIGHT", self.groupPanel, "BOTTOMRIGHT", -42, 98)
+    self.groupDetailChild:SetWidth(width - 70)
+    self.groupDetail:SetWidth(width - 70)
+    place(self.trackItemButton, self.groupPanel, 18, -height + 57, 170)
+    place(self.endItemButton, self.groupPanel, 198, -height + 57, 170)
+    local rows = self.tab == "commands" and self.commandVisibleRows or self.tab == "group" and self.groupVisibleRows or self.visibleRows
+    local step = self.tab == "commands" and commandHeight or rowHeight
+    self.scrollbar:SetHeight(rows * step)
 end
 
 function App:SelectEntry(entryID)
@@ -222,6 +516,7 @@ function App:SetTimer(enabled)
 end
 
 function App:ShowExport(mode)
+    mode = mode or (self.tab == "group" and "group" or self.tab == "commands" and "commands" or "loot")
     if not self.exportFrame then
         local frame = movableFrame("ClassicLootLogExportFrame", 740, 470, "Export loot log")
         label(frame, "Ctrl+A, Ctrl+C: copy all text and save it outside WoW as .txt or .tsv.", 18, -52, 704)
@@ -248,12 +543,20 @@ function App:ShowExport(mode)
         end)
         button(frame, "Loot entries", 100, 170, -432, function() self:ShowExport("loot") end)
         button(frame, "Statistics", 110, 280, -432, function() self:ShowExport("stats") end)
+        button(frame, "Party / Raid", 110, 400, -432, function() self:ShowExport("group") end)
+        button(frame, "Commands", 100, 520, -432, function() self:ShowExport("commands") end)
         Compat.SetScript(frame, "OnHide", function() edit:ClearFocus() end)
         self.exportFrame = frame
     end
     self.exportFrame:Show()
     local exported
-    if mode == "stats" then
+    if mode == "group" then
+        exported = self.groupAdapter.model:Export()
+    elseif mode == "commands" then
+        local lines = {"Command\tDescription"}
+        for _, entry in ipairs(COMMANDS) do lines[table.getn(lines) + 1] = entry.command .. "\t" .. entry.description end
+        exported = table.concat(lines, "\n")
+    elseif mode == "stats" then
         exported = Value.AppendSummary(self.db, Core.ExportSummary(self.db, now()))
     else
         exported = Value.AppendExportColumns(self.db, Core.Export(self.db, formatTimestamp))
@@ -294,14 +597,16 @@ function App:Layout()
     local quantityX = percentX - 8 - quantityWidth
     local itemWidth = math.max(70, quantityX - itemX - 8)
     local top = 170
-    place(frame.titleText, frame, (width - 320) / 2, -14, 320)
+    frame.titleText:SetWidth(math.min(320, width - 80))
+    frame.titleText:SetHeight(24 * textScale)
     place(self.resetButton, frame, 18, -54, 84)
     place(self.exportButton, frame, 108, -54, 106)
     place(self.timerButton, frame, 220, -54, 106)
     place(self.timerText, frame, 340, -61, math.max(150, width - 480))
     place(self.viewButton, frame, width - 133, -54, 115)
     place(self.mobText, frame, 18, -94, width - 36)
-    place(self.status, frame, 18, -119, width - 36)
+    place(self.status, frame, 400, -119, width - 418)
+    self.status:SetHeight(20 * textScale)
     place(self.headers.clock, frame, 18, -149, clockWidth)
     place(self.headers.elapsed, frame, 18 + elapsedX, -149, elapsedWidth)
     place(self.headers.item, frame, 18 + itemX, -149, itemWidth)
@@ -342,6 +647,7 @@ function App:Layout()
     self.lockButton:SetText(settings.locked and "Size: LOCKED" or "Size: UNLOCKED")
     if frame.SetResizable then frame:SetResizable(not settings.locked) end
     if settings.locked then self.resizeGrip:Hide() else self.resizeGrip:Show() end
+    self:LayoutExtraTabs(width, height, textScale, rowHeight)
     self.layouting = false
     self:Refresh()
 end
@@ -444,9 +750,15 @@ function App:CreateWindow()
     self.scrollbar = slider
     frame:EnableMouseWheel(true)
     Compat.SetScript(frame, "OnMouseWheel", function(_, delta)
-        local stats = self.view == "stats" and Core.ItemStats(self.db)
-        local count = stats and (table.getn(stats.rows) + table.getn(stats.materialRows)) or table.getn(self.db.entries)
-        local maxOffset = math.max(0, count - (self.visibleRows or ROWS))
+        local count, visible
+        if self.tab == "commands" then count, visible = table.getn(COMMANDS), self.commandVisibleRows
+        elseif self.tab == "group" then count, visible = table.getn(self.groupAdapter.model:Entries()), self.groupVisibleRows
+        else
+            local stats = self.view == "stats" and Core.ItemStats(self.db)
+            count = stats and (table.getn(stats.rows) + table.getn(stats.materialRows)) or table.getn(self.db.entries)
+            visible = self.visibleRows or ROWS
+        end
+        local maxOffset = math.max(0, count - visible)
         self.offset = math.max(0, math.min(maxOffset, (self.offset or 0) - delta * 3))
         self:Refresh()
     end)
@@ -480,6 +792,7 @@ function App:CreateWindow()
         self:Layout()
     end)
     self.resizeGrip = grip
+    self:CreateExtraTabs(frame)
     Compat.SetScript(frame, "OnSizeChanged", function()
         self:Layout()
     end)
@@ -563,6 +876,16 @@ function App:CaptureLoot()
     local added = Core.AddSnapshot(self.db, slots, time(), now())
     if added > 0 then
         Value.NotifyEntries(self.db, firstNewEntry)
+        -- Native roll IDs identify Group Loot independently. Master Loot has
+        -- no such event, so attach newly observed originals to their source.
+        if self.groupAdapter:Method() == "master" then
+            for index = firstNewEntry, table.getn(self.db.entries) do
+                local entry = self.db.entries[index]
+                if entry.kind == "item" and entry.origin ~= "disenchant" then
+                    self.groupAdapter:ObserveItem(entry.link, entry.name, entry.quality, tostring(entry.source) .. ":" .. entry.id)
+                end
+            end
+        end
         self:Refresh()
     end
     return complete
@@ -582,6 +905,10 @@ function App:Initialize()
     ClassicLootLogDB = Core.Initialize(ClassicLootLogDB, now())
     self.db = ClassicLootLogDB
     Value.Initialize(self.db)
+    self.groupAdapter = GroupEvents.New(self.db, {
+        now = now, time = time,
+        onChange = function() self:Refresh() end,
+    })
     self.tracker = Tracker.New({
         includeGroup = true,
         now = now,
@@ -599,12 +926,15 @@ function App:Initialize()
         OnAccept = function()
             Core.Reset(self.db, now())
             self.tracker:Reset()
+            self.db.groupLoot = {}
+            self.groupAdapter:Reset()
             lootSession = nil
             self.selectedEntryID = nil
+            self.selectedGroupID = nil
             self.offset = 0
             if self.exportFrame then self.exportFrame:Hide() end
             self:Refresh()
-            say("Loot, mob counts, disenchant marks and timer reset.")
+            say("Loot, mobs, party / raid history, disenchant marks and timer reset.")
         end,
         timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
     }
@@ -613,12 +943,26 @@ function App:Initialize()
     SLASH_CLASSICLOOTLOG1 = "/cll"
     SLASH_CLASSICLOOTLOG2 = "/lootlog"
     SlashCmdList.CLASSICLOOTLOG = function(message)
-        local first, last, command, argument = string.find(string.lower(message or ""), "^%s*(%S*)%s*(.-)%s*$")
+        local first, last, command, rawArgument = string.find(message or "", "^%s*(%S*)%s*(.-)%s*$")
+        command = string.lower(command)
+        local argument = string.lower(rawArgument)
         if command == "" or command == "show" then
             if command == "show" then self:Refresh(); self.frame:Show() else self:Toggle() end
         elseif command == "hide" then self.frame:Hide()
         elseif command == "reset" then self:RequestReset()
         elseif command == "log" then self:ShowExport()
+        elseif command == "commands" or command == "help" then
+            self:SetTab("commands"); self.frame:Show()
+        elseif command == "group" or command == "raid" then
+            self:SetTab("group"); self.frame:Show()
+        elseif command == "track" then
+            self:BeginGroupItem(rawArgument ~= "" and rawArgument or nil)
+        elseif command == "focus" then
+            local entry = self.groupAdapter.model:Get(tonumber(argument))
+            if entry and entry.state == "open" then self:SelectGroupEntry(entry.id)
+            else say("Use /cll focus followed by an open party / raid log ID.") end
+        elseif command == "end" then
+            self:EndGroupItem()
         elseif command == "stats" or command == "statistieken" then
             self:SetView("stats")
             self.frame:Show()
@@ -653,7 +997,7 @@ function App:Initialize()
                 say("Usage: /cll " .. command .. " [on|off].")
             elseif command == "scale" then self:SetAutoText(enabled)
             else self:SetSizeLocked(enabled) end
-        else say("Commands: /cll, stats, reset, log, timer, scale, lock, price, epic, sound.") end
+        else say("Type /cll commands for every command and /cll group for party / raid loot.") end
     end
     say("Loaded. Type /cll to open the loot list.")
 end
@@ -673,11 +1017,14 @@ Compat.RegisterEvent(eventFrame, "UNIT_SPELLCAST_INTERRUPTED")
 Compat.RegisterEvent(eventFrame, "UNIT_SPELLCAST_STOP")
 Compat.RegisterEvent(eventFrame, "BAG_UPDATE_DELAYED")
 Compat.RegisterEvent(eventFrame, "LOOT_SLOT_CLEARED")
+Compat.RegisterEvent(eventFrame, "MERCHANT_SHOW")
+for _, eventName in ipairs(GroupEvents.Events) do Compat.RegisterEvent(eventFrame, eventName) end
 for _, eventName in ipairs(Tracker.LegacyEvents or {}) do
     Compat.RegisterEvent(eventFrame, eventName)
 end
 Compat.SetScript(eventFrame, "OnEvent", function(_, event, a, b, c, d)
     if App.tracker then App.tracker:HandleEvent(event, a, b, c, d) end
+    if App.groupAdapter then App.groupAdapter:HandleEvent(event, a, b, c, d) end
     if event == "ADDON_LOADED" then
         local name = a
         if name == addonName or name == launcherAddonName then
@@ -692,7 +1039,15 @@ Compat.SetScript(eventFrame, "OnEvent", function(_, event, a, b, c, d)
                 App.loadedAddon = name
                 App:Initialize()
             end
+        elseif name == "SellValue" and App.db then
+            Value.RefreshPrices(App.db)
+            App:Refresh()
         end
+    elseif event == "MERCHANT_SHOW" and App.db then
+        Compat.After(0, function()
+            Value.RefreshPrices(App.db)
+            App:Refresh()
+        end)
     elseif event == "PLAYER_LOGOUT" then
         if App.db then Core.CheckpointTimer(App.db, now()) end
     elseif event == "LOOT_CLOSED" then

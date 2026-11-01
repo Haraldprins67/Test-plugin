@@ -11,6 +11,7 @@ end
 
 local function test(name, callback)
     GetItemInfo, GetSellValue, GetMerchantItemInfo = nil, nil, nil
+    SellValues = nil
     UIErrorsFrame, DEFAULT_CHAT_FRAME, PlaySound = nil, nil, nil
     callback()
     passed = passed + 1
@@ -53,6 +54,91 @@ test("optional GetSellValue supplies prices and provider failures stay harmless"
     equal(Value.GetUnitPrice(db, 1), 42)
     equal(Value.GetEntryVendorText(db, entry(1, 3)), "1s 26c")
     equal(Value.GetUnitPrice(db, 2), nil)
+end)
+
+test("SellValue item-string database supplies unit copper prices without stack inflation", function()
+    -- This is the public SellValue_IDFromLink / SellValues storage contract.
+    SellValues = {["item:1"] = 25, ["item:2"] = 0}
+    local db = Value.Initialize({entries = {}})
+    local price, source = Value.GetUnitPrice(db, "|Hitem:1:0:0|h[Cloth]|h")
+    equal(price, 25)
+    equal(source, "SellValue")
+    equal(Value.ProviderName(), "SellValue")
+    equal(Value.GetEntryVendorText(db, entry(1, 20)), "5s 0c")
+    equal(Value.GetEntryVendorText(db, entry(2, 20)), "0c")
+    equal(Value.GetEntryVendorText(db, entry(3, 20)), "Unknown")
+    equal(SellValues["item:1"], 25, "integration must not rewrite SellValue data")
+    equal(SellValues[1], nil)
+end)
+
+test("SellValue arriving after a native cache supersedes automatic prices and follows updates", function()
+    local db = Value.Initialize({entries = {}})
+    GetItemInfo = function() return "Item", "link", 1, 1, 1, "Class", "Sub", 1, "", "icon", 10 end
+    equal(Value.GetUnitPrice(db, 1), 10)
+    equal(db.vendorPriceSources[1], "client")
+    SellValues = {["item:1"] = 30}
+    equal(Value.GetUnitPrice(db, 1), 30)
+    equal(db.vendorPriceSources[1], "SellValue")
+    SellValues["item:1"] = 45
+    equal(Value.GetUnitPrice(db, 1), 45)
+    equal(db.vendorPrices[1], 45)
+end)
+
+test("explicit manual overrides stay authoritative over SellValue until cleared", function()
+    local db = Value.Initialize({entries = {}})
+    SellValues = {["item:1"] = 30}
+    equal(Value.GetUnitPrice(db, 1), 30)
+    equal(Value.SetPrice(db, 1, 70), true)
+    SellValues["item:1"] = 45
+    equal(Value.GetUnitPrice(db, 1), 70)
+    Value.RefreshPrices(db)
+    equal(Value.GetUnitPrice(db, 1), 70)
+    equal(Value.SetPrice(db, 1, 0), true)
+    Value.RefreshPrices(db)
+    equal(Value.GetUnitPrice(db, 1), 0)
+    equal(Value.ClearPrice(db, 1), true)
+    equal(Value.GetUnitPrice(db, 1), 45)
+end)
+
+test("legacy cached values with unknown provenance migrate without losing a possible user override", function()
+    SellValues = {["item:1"] = 99, ["item:2"] = 88}
+    local db = Value.Initialize({entries = {}, vendorPrices = {[1] = 12, ["2"] = 0}})
+    equal(db.vendorSchema, 2)
+    equal(Value.GetUnitPrice(db, 1), 12)
+    equal(Value.GetUnitPrice(db, 2), 0)
+    Value.RefreshPrices(db)
+    equal(Value.GetUnitPrice(db, 1), 12)
+    Value.ClearPrice(db, 1)
+    equal(Value.GetUnitPrice(db, 1), 99)
+end)
+
+test("price refresh removes automatic caches but preserves saved manual prices", function()
+    local db = Value.Initialize({entries = {}})
+    GetItemInfo = function(id)
+        return "Item", "link", 1, 1, 1, "Class", "Sub", 1, "", "icon", id * 10
+    end
+    Value.SetPrice(db, 1, 7)
+    equal(Value.GetUnitPrice(db, 2), 20)
+    Value.RefreshPrices(db)
+    equal(db.vendorPrices[1], 7)
+    equal(db.vendorPrices[2], nil)
+    equal(db.vendorPriceSources[2], nil)
+    SellValues = {["item:2"] = 25}
+    equal(Value.GetUnitPrice(db, 2), 25)
+    equal(Value.GetUnitPrice(db, 1), 7)
+end)
+
+test("compatible SellValue key variants and invalid provider values stay safe", function()
+    local db = Value.Initialize({entries = {}})
+    SellValues = {[1] = 15, ["2"] = 20, ["item:3"] = -10, ["item:4"] = 1 / 0}
+    equal(Value.GetUnitPrice(db, 1), 15)
+    equal(Value.GetUnitPrice(db, 2), 20)
+    equal(Value.GetUnitPrice(db, 3), nil)
+    equal(Value.GetUnitPrice(db, 4), nil)
+    SellValues = "invalid provider table"
+    GetSellValue = function(id) if id == 5 then return 7 end end
+    equal(Value.ProviderName(), "GetSellValue")
+    equal(Value.GetUnitPrice(db, 5), 7)
 end)
 
 test("manual prices validate copper override providers and clear cleanly", function()

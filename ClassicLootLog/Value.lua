@@ -31,6 +31,22 @@ end
 local function ensureData(db)
     if type(db) ~= "table" then return nil end
     db.vendorPrices = type(db.vendorPrices) == "table" and db.vendorPrices or {}
+    db.vendorOverrides = type(db.vendorOverrides) == "table" and db.vendorOverrides or {}
+    db.vendorPriceSources = type(db.vendorPriceSources) == "table" and db.vendorPriceSources or {}
+    if db.vendorSchema ~= 2 then
+        -- Version 1.3 mixed user-entered and automatically cached values.
+        -- Without provenance, preserve a saved value as a manual override
+        -- rather than silently replacing a price the user may have chosen.
+        for key, amount in pairs(db.vendorPrices) do
+            local id, price = itemID(key), copper(amount)
+            local source = db.vendorPriceSources[key]
+            if id and price ~= nil and (source == nil or source == "saved" or source == "manual") then
+                if db.vendorOverrides[id] == nil then db.vendorOverrides[id] = price end
+                db.vendorPriceSources[id] = "manual"
+            end
+        end
+        db.vendorSchema = 2
+    end
     db.alerts = type(db.alerts) == "table" and db.alerts or {}
     if db.alerts.epic == nil then db.alerts.epic = true end
     if db.alerts.sound == nil then db.alerts.sound = false end
@@ -55,7 +71,9 @@ function Value.SetPrice(db, linkOrID, amount)
     db = ensureData(db)
     local id, price = itemID(linkOrID), copper(amount)
     if not db or not id or price == nil then return false end
+    db.vendorOverrides[id] = price
     db.vendorPrices[id] = price
+    db.vendorPriceSources[id] = "manual"
     return true
 end
 
@@ -63,9 +81,44 @@ function Value.ClearPrice(db, linkOrID)
     db = ensureData(db)
     local id = itemID(linkOrID)
     if not db or not id then return false end
+    db.vendorOverrides[id] = nil
+    db.vendorOverrides[tostring(id)] = nil
     db.vendorPrices[id] = nil
     db.vendorPrices[tostring(id)] = nil
+    db.vendorPriceSources[id] = nil
+    db.vendorPriceSources[tostring(id)] = nil
     return true
+end
+
+function Value.RefreshPrices(db)
+    db = ensureData(db)
+    if not db then return end
+    for key in pairs(db.vendorPrices) do
+        local id = itemID(key)
+        local manual = id and (copper(db.vendorOverrides[id]) or copper(db.vendorOverrides[tostring(id)]))
+        if manual == nil then
+            db.vendorPrices[key] = nil
+            db.vendorPriceSources[key] = nil
+        end
+    end
+end
+
+function Value.ProviderName()
+    if type(SellValues) == "table" then return "SellValue" end
+    if type(GetSellValue) == "function" then return "GetSellValue" end
+    return nil
+end
+
+local function sellValuePrice(id)
+    if type(SellValues) ~= "table" then return nil end
+    -- CapnBry/Greenman/Improved SellValue uses SellValues["item:2589"].
+    -- Its merchant scan divides stack money by stackCount before saving, so
+    -- this is already the copper price of ONE item. Never multiply it here.
+    local price = copper(SellValues["item:" .. tostring(id)])
+    -- Numeric keys are accepted for compatible forks of the same database.
+    if price == nil then price = copper(SellValues[id]) end
+    if price == nil then price = copper(SellValues[tostring(id)]) end
+    return price
 end
 
 function Value.GetUnitPrice(db, linkOrID)
@@ -73,12 +126,32 @@ function Value.GetUnitPrice(db, linkOrID)
     local id = itemID(linkOrID)
     if not id then return nil end
     if db then
-        local saved = copper(db.vendorPrices[id])
-        if saved == nil then saved = copper(db.vendorPrices[tostring(id)]) end
-        if saved ~= nil then return saved, "saved" end
+        local manual = copper(db.vendorOverrides[id])
+        if manual == nil then manual = copper(db.vendorOverrides[tostring(id)]) end
+        if manual ~= nil then return manual, "manual" end
     end
 
-    local price, source
+    -- Check the live SellValue table before automatic caches. Custom-server
+    -- prices can change when SellValue learns them at a merchant, and the
+    -- provider may also load after this addon has already cached a price.
+    local price = sellValuePrice(id)
+    if price ~= nil then
+        if db then
+            db.vendorPrices[id] = price
+            db.vendorPriceSources[id] = "SellValue"
+        end
+        return price, "SellValue"
+    end
+
+    if db then
+        local cached = copper(db.vendorPrices[id])
+        if cached == nil then cached = copper(db.vendorPrices[tostring(id)]) end
+        if cached ~= nil then
+            return cached, db.vendorPriceSources[id] or db.vendorPriceSources[tostring(id)] or "saved"
+        end
+    end
+
+    local source
     if type(GetItemInfo) == "function" then
         -- Vanilla normally has no sell-price return. Use it only when a
         -- client extension (or newer client) actually supplies return 11.
@@ -93,7 +166,10 @@ function Value.GetUnitPrice(db, linkOrID)
         if ok then price = copper(sellPrice) end
         if price ~= nil then source = "library" end
     end
-    if price ~= nil and db then db.vendorPrices[id] = price end
+    if price ~= nil and db then
+        db.vendorPrices[id] = price
+        db.vendorPriceSources[id] = source
+    end
     return price, source
 end
 

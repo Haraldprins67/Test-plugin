@@ -5,6 +5,9 @@ local clock, stamp, slots = 100, 1700000000, {}
 local popup, chat = nil, {}
 local combatLog, bags = {}, {}
 local notices, vendorPrices = {}, {}
+local lootMethod, partyCount, raidCount = "freeforall", 0, 0
+local lootRolls = {}
+local groupNames = {player = "Testspeler", pet = "Testpet", party1 = "Alice", party2 = "Bob", party3 = "Cara", raid1 = "Testspeler", raid2 = "Alice", raid3 = "Bob", raid4 = "Cara"}
 
 local Widget = {}
 local noops = {}
@@ -172,7 +175,22 @@ C_Container = {
     end,
 }
 NUM_BAG_SLOTS = 4
-function UnitName() return "Testspeler" end
+function UnitName(unit)
+    if unit == "player" or unit == "pet" then return groupNames[unit] end
+    local party = type(unit) == "string" and tonumber(unit:match("^party(%d+)$"))
+    if party and party <= partyCount then return groupNames[unit] end
+    local raid = type(unit) == "string" and tonumber(unit:match("^raid(%d+)$"))
+    if raid and raid <= raidCount then return groupNames[unit] end
+    return nil
+end
+function GetNumPartyMembers() return partyCount end
+function GetNumRaidMembers() return raidCount end
+function GetLootMethod() return lootMethod, 0, 0 end
+function GetLootRollItemLink(rollID) return lootRolls[rollID] and lootRolls[rollID].link end
+function GetLootRollItemInfo(rollID)
+    local roll = lootRolls[rollID]
+    if roll then return roll.icon or 132889, roll.name, roll.quantity or 1, roll.quality or 4, false, true, true end
+end
 function GetRealmName() return "Testrealm" end
 function IsModifiedClick() return false end
 function IsShiftKeyDown() return false end
@@ -219,6 +237,8 @@ assert(loadfile("ClassicLootLog/Compat.lua"))()
 assert(loadfile("ClassicLootLog/Core.lua"))("ClassicLootLog", ns)
 assert(loadfile("ClassicLootLog/Tracking.lua"))("ClassicLootLog", ns)
 assert(loadfile("ClassicLootLog/Value.lua"))()
+assert(loadfile("ClassicLootLog/GroupLoot.lua"))()
+assert(loadfile("ClassicLootLog/GroupEvents.lua"))()
 assert(loadfile("ClassicLootLog/Main.lua"))("ClassicLootLog", ns)
 local passed = 0
 local function test(name, callback)
@@ -321,6 +341,12 @@ local function resetSession()
     if ns.App.SetView then ns.App:SetView("loot") end
     ns.App.selectedEntryID = nil
     bags, combatLog = {}, {}
+    lootMethod, partyCount, raidCount = "freeforall", 0, 0
+    lootRolls = {}
+    if ns.App.groupAdapter then
+        ClassicLootLogDB.groupLoot = {}
+        ns.App.groupAdapter:Reset()
+    end
     ns.App.offset = 0
     ns.App:Refresh()
 end
@@ -383,15 +409,18 @@ test("list scrolling reaches the oldest records while export retains every row",
     dispatch("LOOT_OPENED")
     equal(#ClassicLootLogDB.entries, 20)
     equal(ns.App.rows[1].entry.id, 20)
-    equal(ns.App.rows[13].entry.id, 8)
+    local visible = ns.App.visibleRows
+    assert(visible > 0 and visible < 20)
+    equal(ns.App.rows[visible].entry.id, 20 - visible + 1)
     ns.App.frame.scripts.OnMouseWheel(ns.App.frame, -1)
     equal(ns.App.offset, 3)
     equal(ns.App.rows[1].entry.id, 17)
-    ns.App.scrollbar:SetValue(7)
-    equal(ns.App.rows[1].entry.id, 13)
-    equal(ns.App.rows[13].entry.id, 1)
+    local maxOffset = 20 - visible
+    ns.App.scrollbar:SetValue(maxOffset)
+    equal(ns.App.rows[1].entry.id, visible)
+    equal(ns.App.rows[visible].entry.id, 1)
     ns.App.frame.scripts.OnMouseWheel(ns.App.frame, -10)
-    equal(ns.App.offset, 7)
+    equal(ns.App.offset, maxOffset)
     ns.App.frame.scripts.OnMouseWheel(ns.App.frame, 10)
     equal(ns.App.offset, 0)
     SlashCmdList.CLASSICLOOTLOG("log")
@@ -690,18 +719,19 @@ test("resizing reflows columns and scales text while preserving saved window set
     ns.App:Resize(900, 590)
     local path, baselineFont = ns.App.rows[1].item:GetFont()
     local baselineWidth = ns.App.rows[1].item:GetWidth()
-    equal(ns.App.visibleRows, 13)
+    local baselineVisible = ns.App.visibleRows
+    assert(baselineVisible > 1)
     ns.App:Resize(680, 430)
     local _, smallFont = ns.App.rows[1].item:GetFont()
     assert(smallFont < baselineFont, "automatic text must shrink with a narrower window")
     assert(ns.App.rows[1].item:GetWidth() < baselineWidth, "item column must reflow")
-    assert(ns.App.visibleRows < 13)
+    assert(ns.App.visibleRows < baselineVisible)
     equal(ClassicLootLogDB.ui.width, 680)
     equal(ClassicLootLogDB.ui.height, 430)
     ns.App:Resize(1280, 900)
     local _, largeFont = ns.App.rows[1].item:GetFont()
     assert(largeFont > baselineFont)
-    assert(ns.App.visibleRows > 13)
+    assert(ns.App.visibleRows > baselineVisible)
     ns.App:Resize(10, 10)
     equal(ns.App.frame:GetWidth(), 680)
     equal(ns.App.frame:GetHeight(), 430)
@@ -786,6 +816,15 @@ test("vendor column separates unknown and zero prices and excludes destroyed ori
     local totals = ns.Value.GetTotals(ClassicLootLogDB)
     equal(totals.knownCopper, 650)
     equal(totals.unknownUnits, 0)
+    SellValues = {["item:2589"] = 100}
+    dispatch("ADDON_LOADED", "SellValue")
+    equal(ns.App.rows[3].vendor:GetText(), "2s 0c", "SellValue loaded later must refresh displayed prices")
+    equal(ns.App.rows[1].vendor:GetText(), "5s 0c", "SellValue refresh must preserve an explicit manual override")
+    SellValues["item:2589"] = 110
+    dispatch("MERCHANT_SHOW")
+    flushTimers()
+    equal(ns.App.rows[3].vendor:GetText(), "2s 20c", "newly learned merchant prices must refresh the column")
+    SellValues = nil
     vendorPrices = {}
 end)
 
@@ -832,6 +871,174 @@ test("epic notifications fire only for new original purple drops and respect the
     slots = {epic}
     dispatch("LOOT_OPENED")
     equal(#notices, before + 2, "resettable row IDs must not suppress fresh drops")
+end)
+
+
+local function groupLink(id, name)
+    return "|cffa335ee|Hitem:" .. id .. ":0:0:0|h[" .. name .. "]|h|r"
+end
+
+local function groupEntry()
+    local entries = ClassicLootLogDB.groupLoot.entries
+    return entries[#entries]
+end
+
+local function ranks(entry)
+    return ns.App.groupAdapter.model:Rankings(entry)
+end
+
+test("title stays centered in its decorative header when the window is resized", function()
+    local title, header = ns.App.frame.titleText, ns.App.frame.header
+    assert(header, "decorative title header must be retained for its text anchor")
+    equal(title.anchor[1], "CENTER")
+    equal(title.anchor[2], header)
+    equal(title.anchor[3], "CENTER")
+    equal(title.anchor[4], 0)
+    ns.App:Resize(680, 430)
+    equal(title.anchor[2], header)
+    equal(title.anchor[1], "CENTER")
+    ns.App:Resize(1280, 900)
+    equal(title.anchor[2], header)
+    equal(title.anchor[1], "CENTER")
+    ns.App:Resize(900, 590)
+end)
+
+test("Commands tab exposes a complete documented command list and returns to the loot view", function()
+    resetSession()
+    SlashCmdList.CLASSICLOOTLOG("commands")
+    equal(ns.App.tab, "commands")
+    local commands = ns.App:GetCommands()
+    assert(#commands >= 15, "the command reference must include old and new commands")
+    local all = {}
+    for _, entry in ipairs(commands) do
+        assert(type(entry.command) == "string" and entry.command ~= "")
+        assert(type(entry.description) == "string" and entry.description ~= "")
+        all[#all + 1] = entry.command
+    end
+    local text = table.concat(all, "\n")
+    for _, name in ipairs({"timer", "price", "epic", "sound", "scale", "lock", "commands", "group", "track"}) do
+        assert(text:find("/cll " .. name, 1, true), "missing command reference: " .. name)
+    end
+    assert(ns.App.commandsRows[1].command:GetText() ~= "")
+    ns.App:SetTab("group")
+    equal(ns.App.tab, "group")
+    ns.App:SetView("stats")
+    equal(ns.App.tab, "loot")
+    equal(ns.App.view, "stats")
+    ns.App:SetView("loot")
+end)
+
+test("group loot tracks choices and shows the two highest eligible need rolls plus the actual recipient", function()
+    resetSession()
+    lootMethod, partyCount = "group", 3
+    local link = groupLink(18803, "Group loot test")
+    lootRolls[701] = {link = link, name = "Group loot test", quality = 4}
+    dispatch("START_LOOT_ROLL", 701, 60000)
+    dispatch("CHAT_MSG_LOOT", "Alice has selected Need for: " .. link)
+    dispatch("CHAT_MSG_LOOT", "Bob has selected Greed for: " .. link)
+    dispatch("CHAT_MSG_LOOT", "Cara has selected Need for: " .. link)
+    dispatch("CHAT_MSG_LOOT", "Need Roll - 81 for " .. link .. " by Alice")
+    dispatch("CHAT_MSG_LOOT", "Need Roll - 75 for " .. link .. " by Cara")
+    dispatch("CHAT_MSG_LOOT", "Greed Roll - 99 for " .. link .. " by Bob")
+    dispatch("CHAT_MSG_LOOT", "Alice won: " .. link)
+    local entry = groupEntry()
+    assert(not entry.recipient, "a roll announcement is not yet an observed item receipt")
+    dispatch("CHAT_MSG_LOOT", "Alice receives loot: " .. link .. ".")
+    equal(entry.recipient, "Alice")
+    equal(entry.distributionMethod, "group")
+    local ranking = ranks(entry)
+    equal(ranking.highest.player, "Alice")
+    equal(ranking.highest.value, 81)
+    equal(ranking.second.player, "Cara")
+    equal(ranking.second.value, 75)
+    SlashCmdList.CLASSICLOOTLOG("group")
+    equal(ns.App.tab, "group")
+    local row = ns.App.groupRows[1]
+    assert(row.method:GetText():lower():find("group", 1, true))
+    assert(row.winner:GetText():find("Alice", 1, true))
+    assert(row.highest:GetText():find("81", 1, true))
+    assert(row.second:GetText():find("75", 1, true))
+    ns.App:SelectGroupEntry(entry.id)
+    local detail = ns.App.groupDetail:GetText():lower()
+    assert(detail:find("bob", 1, true))
+    assert(detail:find("greed", 1, true))
+    ns.App:ShowExport("group")
+    local exported = ns.App.exportFrame.edit:GetText()
+    assert(exported:find("Alice", 1, true))
+    assert(exported:find("81", 1, true))
+    assert(exported:find("75", 1, true))
+end)
+
+test("master loot attaches slash-roll results to a selected item and retains the distribution method", function()
+    resetSession()
+    lootMethod, partyCount = "master", 3
+    local link = groupLink(18809, "Master loot test")
+    local entry = ns.App.groupAdapter:BeginItem(link, "master")
+    assert(entry)
+    ns.App:SelectGroupEntry(entry.id)
+    dispatch("CHAT_MSG_SYSTEM", "Alice rolls 62 (1-100)")
+    dispatch("CHAT_MSG_SYSTEM", "Bob rolls 88 (1-100)")
+    dispatch("CHAT_MSG_SYSTEM", "Cara rolls 41 (1-100)")
+    dispatch("CHAT_MSG_LOOT", "Bob receives loot: " .. link .. ".")
+    equal(entry.recipient, "Bob")
+    equal(entry.method, "master")
+    equal(entry.distributionMethod, "master")
+    local ranking = ranks(entry)
+    equal(ranking.highest.player, "Bob")
+    equal(ranking.highest.value, 88)
+    equal(ranking.second.player, "Alice")
+    equal(ranking.second.value, 62)
+    ns.App:SetTab("group")
+    assert(ns.App.groupRows[1].method:GetText():lower():find("master", 1, true))
+    assert(ns.App.groupRows[1].highest:GetText():find("Bob", 1, true))
+    assert(ns.App.groupRows[1].second:GetText():find("Alice", 1, true))
+end)
+
+test("EPGP records flexible bid spellings and resolves the winning bid from the observed recipient", function()
+    resetSession()
+    lootMethod, partyCount = "master", 3
+    local link = groupLink(18816, "EPGP test")
+    local entry = ns.App.groupAdapter:BeginItem(link, "master")
+    ns.App:SelectGroupEntry(entry.id)
+    dispatch("CHAT_MSG_PARTY", "!m.A.x", "Alice")
+    dispatch("CHAT_MSG_PARTY", "n33d", "Bob")
+    dispatch("CHAT_MSG_PARTY", "m i n", "Cara")
+    dispatch("CHAT_MSG_PARTY", "MAX", "Outsider")
+    dispatch("CHAT_MSG_LOOT", "Cara receives loot: " .. link .. ".")
+    equal(entry.method, "epgp")
+    equal(entry.distributionMethod, "master")
+    equal(entry.recipient, "Cara")
+    equal(entry.winnerBid, "MIN")
+    assert(not entry.bids.Outsider and not entry.bids.outsider, "nonmembers cannot inject a winning bid")
+    equal(#entry.bidOrder, 3)
+    ns.App:SetTab("group")
+    local row = ns.App.groupRows[1]
+    assert(row.method:GetText():lower():find("ep", 1, true))
+    assert(row.winner:GetText():find("Cara", 1, true))
+    assert(row.bid:GetText():find("MIN", 1, true))
+    ns.App:SelectGroupEntry(entry.id)
+    local detail = ns.App.groupDetail:GetText()
+    assert(detail:find("Alice", 1, true))
+    assert(detail:find("MAX", 1, true))
+    assert(detail:find("Bob", 1, true))
+    assert(detail:find("NEED", 1, true))
+end)
+
+test("simultaneous identical item rolls keep ambiguous receipts unassigned", function()
+    resetSession()
+    lootMethod, partyCount = "group", 3
+    local link = groupLink(19375, "Identical items")
+    lootRolls[801] = {link = link, name = "Identical items"}
+    lootRolls[802] = {link = link, name = "Identical items"}
+    dispatch("START_LOOT_ROLL", 801, 60000)
+    dispatch("START_LOOT_ROLL", 802, 60000)
+    equal(#ClassicLootLogDB.groupLoot.entries, 2)
+    dispatch("CHAT_MSG_LOOT", "Bob receives loot: " .. link .. ".")
+    local data = ClassicLootLogDB.groupLoot
+    equal(#data.unassigned, 1)
+    assert(not data.entries[1].recipient and not data.entries[2].recipient)
+    ns.App:SetTab("group")
+    assert(ns.App.groupStatus:GetText():lower():find("unassigned", 1, true))
 end)
 
 print(string.format("%d WoW integration smoke tests passed", passed))

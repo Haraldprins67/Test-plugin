@@ -25,9 +25,10 @@ launcher_metadata, launcher_files = toc(root / "Test-plugin.toc")
 assert launcher_metadata == manual_metadata
 assert launcher_files == manual_files
 assert [path.name for path in manual_files] == [
-    "Compat.lua", "Core.lua", "Tracking.lua", "Value.lua", "Main.lua"
+    "Compat.lua", "Core.lua", "Tracking.lua", "Value.lua", "GroupLoot.lua", "GroupEvents.lua", "Main.lua"
 ]
 assert manual_metadata["Interface"] == "11200"
-assert manual_metadata["Version"] == "1.3.0"
+assert manual_metadata["Version"] == "1.4.0"
+assert "SellValue" in manual_metadata["OptionalDeps"].split(", ")
 assert manual_metadata["SavedVariablesPerCharacter"] == "ClassicLootLogDB"
 print("PASS launcher and manual entry points load the same version and addon files")

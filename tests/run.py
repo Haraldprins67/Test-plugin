@@ -31,6 +31,8 @@ def main() -> None:
         "tests/legacy_tracking_spec.lua",
         "tests/legacy_ui_spec.lua",
         "tests/value_spec.lua",
+        "tests/group_loot_spec.lua",
+        "tests/group_events_spec.lua",
     )
     for suite in legacy_suites:
         print(f"Running {suite} with Lua 5.1", flush=True)
