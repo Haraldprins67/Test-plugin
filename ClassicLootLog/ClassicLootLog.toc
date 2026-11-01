@@ -1,8 +1,8 @@
 ## Interface: 11200
 ## Title: Classic Loot Log
-## Notes: Loot tracking, compact /sl metrics, SellValue prices, raid rolls and complete log exports for OctoWoW.
+## Notes: Loot tracking, finances, confirmed vendor sales, disenchant materials and compact /sl metrics for OctoWoW.
 ## Author: Haraldprins67
-## Version: 1.5.0
+## Version: 1.6.0
 ## OptionalDeps: SellValue
 ## SavedVariablesPerCharacter: ClassicLootLogDB
 
@@ -12,6 +12,8 @@ Tracking.lua
 Value.lua
 GroupLoot.lua
 GroupEvents.lua
+Finance.lua
+Merchant.lua
 Mini.lua
 FileExport.lua
 Main.lua

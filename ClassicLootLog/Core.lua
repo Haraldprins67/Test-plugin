@@ -94,6 +94,7 @@ function Core.Reset(db, now)
     db.timer.startedAt = db.timer.enabled and number(now) or nil
     db.mobs = { total = 0, timed = 0, seen = {}, kills = {} }
     db.groupLoot = { entries = {}, unassigned = {}, nextID = 1 }
+    db.finance = {salesCopper = 0, buybackCopper = 0, sales = {}, buybacks = {}, unconfirmed = {}}
 end
 
 function Core.RecordMobKill(db, guid, name, timestamp, clock)

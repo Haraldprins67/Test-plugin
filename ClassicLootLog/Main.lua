@@ -9,6 +9,8 @@ local Core = ns.Core
 local Tracker = ns.Tracker
 local Value = ns.Value
 local GroupEvents = ns.GroupEvents
+local Finance = ns.Finance
+local Merchant = ns.Merchant
 local Mini = ns.Mini
 local FileExport = ns.FileExport
 local App = {}
@@ -20,6 +22,7 @@ local COMMANDS = {
     {command = "/cll show / hide", description = "Show or hide the main window."},
     {command = "/cll commands", description = "Open this command reference (also: /cll help)."},
     {command = "/cll group", description = "Open the party / raid loot tracker."},
+    {command = "/cll finance", description = "Show original-drop value, confirmed vendor income and disenchant materials."},
     {command = "/cll stats", description = "Show item shares in the loot tab."},
     {command = "/cll reset", description = "Confirm clearing session loot, mobs and party / raid history."},
     {command = "/cll log", description = "Export the current tab; select another export with its buttons."},
@@ -148,6 +151,7 @@ function App:Refresh()
     self:UpdateTabControls()
     if self.tab == "commands" then self:RefreshCommands(); return end
     if self.tab == "group" then self:RefreshGroup(); return end
+    if self.tab == "finance" then self:RefreshFinance(); return end
     local db = self.db
     local stats = Core.ItemStats(db)
     local percentages = {}
@@ -227,8 +231,9 @@ function App:GetCommands()
 end
 
 function App:SetTab(tab)
-    if tab ~= "commands" and tab ~= "group" then tab = "loot" end
+    if tab ~= "commands" and tab ~= "group" and tab ~= "finance" then tab = "loot" end
     self.tab, self.offset = tab, 0
+    if tab == "finance" and self.financeScroll then self.financeScroll:SetVerticalScroll(0) end
     self:Layout()
 end
 
@@ -242,6 +247,8 @@ function App:UpdateTabControls()
     end
     visible(self.commandsPanel, tab == "commands")
     visible(self.groupPanel, tab == "group")
+    visible(self.financePanel, tab == "finance")
+    visible(self.scrollbar, tab ~= "finance")
     visible(self.viewButton, tab == "loot")
     visible(self.empty, tab == "loot")
     visible(self.selectionText, tab == "loot")
@@ -252,8 +259,59 @@ function App:UpdateTabControls()
     if tab ~= "loot" then for _, row in ipairs(self.rows) do row:Hide() end end
     self.footer:SetText(tab == "group"
         and "Focus an item for unlinked bids or /roll. Need outranks Greed. A receipt confirms the recipient."
+        or tab == "finance" and "Drop value is an estimate. Vendor income counts confirmed sales; DE materials show produced quantities."
         or tab == "commands" and "Optional arguments in [brackets] may be omitted to toggle a setting. Prices are copper per item."
         or "Mobs/hour uses timed kills. Item % uses original items. Drag the lower-right corner to resize.")
+end
+
+function App:RefreshFinance()
+    local summary = Finance.Summary(self.db)
+    self.financeDropValue:SetText(Finance.FormatMoneyAlways(summary.dropCopper))
+    self.financeSalesValue:SetText(Finance.FormatMoneyAlways(summary.salesCopper))
+    self.financeNetValue:SetText(Finance.FormatMoneyAlways(summary.netSalesCopper))
+    self.financeDropDetail:SetText(summary.unknownDropUnits > 0
+        and ("Known subtotal; " .. summary.unknownDropUnits .. " original units have an unknown vendor price.")
+        or (summary.totalDropUnits .. " original item units, including originals later disenchanted."))
+    self.financeSalesDetail:SetText(string.format("%d confirmed sales | %d unconfirmed transactions", table.getn(summary.sales), summary.unconfirmedTransactions))
+    self.financeBuybackDetail:SetText("Buybacks: " .. Finance.FormatMoneyAlways(summary.buybackCopper))
+    self.financeMaterialsTotal:SetText(string.format("%d produced units | %d original items disenchanted", summary.totalMaterials, summary.originalsDisenchanted))
+    self.status:SetText(summary.totalMaterials .. " DE materials")
+    self.financeNoMaterials:SetText(summary.totalMaterials == 0 and "No disenchant materials recorded yet." or "")
+    local width = self.financeContentWidth or 800
+    local scale = self.textScale or 1
+    local rowHeight = math.floor(25 * scale + 0.5)
+    for index, item in ipairs(summary.materialRows) do
+        local row = self.financeMaterialRows[index]
+        if not row then
+            row = CreateFrame("Frame", nil, self.financeChild)
+            local previousGroup = activeFontGroup
+            activeFontGroup = self.fonts
+            row.item = label(row, "", 0, -4, width - 100)
+            row.quantity = label(row, "", width - 90, -4, 80)
+            activeFontGroup = previousGroup
+            for _, font in ipairs({row.item, row.quantity}) do
+                local path, size, flags = font:GetFont()
+                if path and size then font:SetFont(path, size * scale, flags or "") end
+            end
+            self.financeMaterialRows[index] = row
+        end
+        row.entry = item
+        Compat.SetSize(row, width, rowHeight)
+        place(row, self.financeChild, 0, -225 - (index - 1) * rowHeight)
+        place(row.item, row, 0, -4, width - 100)
+        place(row.quantity, row, width - 90, -4, 80)
+        row.item:SetHeight(rowHeight - 6)
+        row.quantity:SetHeight(rowHeight - 6)
+        row.item:SetText(item.link and string.find(item.link, "|H", 1, true) and item.link or item.name)
+        row.quantity:SetText(tostring(item.quantity))
+        row:Show()
+    end
+    for index = table.getn(summary.materialRows) + 1, table.getn(self.financeMaterialRows) do
+        self.financeMaterialRows[index]:Hide()
+    end
+    self.financeChild:SetHeight(math.max(270, 245 + table.getn(summary.materialRows) * rowHeight))
+    self.financeScroll:UpdateScrollChildRect()
+    self:UpdateSessionStats()
 end
 
 function App:RefreshCommands()
@@ -399,9 +457,11 @@ function App:CreateExtraTabs(frame)
         loot = button(frame, "Loot", 90, 18, -112, function() self:SetTab("loot") end),
         commands = button(frame, "Commands", 120, 116, -112, function() self:SetTab("commands") end),
         group = button(frame, "Party / Raid", 140, 244, -112, function() self:SetTab("group") end),
+        finance = button(frame, "Finances", 104, 392, -112, function() self:SetTab("finance") end),
     }
     self.commandsPanel = CreateFrame("Frame", nil, frame)
     self.groupPanel = CreateFrame("Frame", nil, frame)
+    self.financePanel = CreateFrame("Frame", nil, frame)
     self.groupStatus = self.status
     self.commandHeaders = {
         command = label(self.commandsPanel, "Command", 18, -149, 220, "GameFontNormal"),
@@ -437,10 +497,29 @@ function App:CreateExtraTabs(frame)
     self.groupDetailScroll:SetScrollChild(self.groupDetailChild)
     self.trackItemButton = button(self.groupPanel, "Track selected loot", 170, 18, -533, function() self:BeginGroupItem() end)
     self.endItemButton = button(self.groupPanel, "Close focused item", 170, 198, -533, function() self:EndGroupItem() end)
+    self.financeScroll = CreateFrame("ScrollFrame", "ClassicLootLogFinanceScroll", self.financePanel, "UIPanelScrollFrameTemplate")
+    self.financeChild = CreateFrame("Frame", nil, self.financeScroll)
+    Compat.SetSize(self.financeChild, 800, 270)
+    self.financeScroll:SetScrollChild(self.financeChild)
+    self.financeLabels = {
+        drop = label(self.financeChild, "Original drop vendor value", 0, 0, 790, "GameFontNormal"),
+        sales = label(self.financeChild, "Actual vendor sales (gross)", 0, -80, 390, "GameFontNormal"),
+        net = label(self.financeChild, "Net vendor income", 410, -80, 380, "GameFontNormal"),
+        materials = label(self.financeChild, "Disenchant materials produced", 0, -173, 790, "GameFontNormal"),
+    }
+    self.financeDropValue = label(self.financeChild, "", 0, -24, 790, "GameFontNormalLarge")
+    self.financeDropDetail = label(self.financeChild, "", 0, -49, 790)
+    self.financeSalesValue = label(self.financeChild, "", 0, -104, 390, "GameFontNormalLarge")
+    self.financeNetValue = label(self.financeChild, "", 410, -104, 380, "GameFontNormalLarge")
+    self.financeSalesDetail = label(self.financeChild, "", 0, -130, 390)
+    self.financeBuybackDetail = label(self.financeChild, "", 410, -130, 380)
+    self.financeMaterialsTotal = label(self.financeChild, "", 0, -198, 790)
+    self.financeNoMaterials = label(self.financeChild, "", 0, -225, 790)
+    self.financeMaterialRows = {}
 end
 
 function App:LayoutExtraTabs(width, height, scale, rowHeight)
-    for _, panel in ipairs({self.commandsPanel, self.groupPanel}) do
+    for _, panel in ipairs({self.commandsPanel, self.groupPanel, self.financePanel}) do
         Compat.SetSize(panel, width, height)
         panel:SetPoint("TOPLEFT", self.frame, "TOPLEFT", 0, 0)
     end
@@ -485,6 +564,26 @@ function App:LayoutExtraTabs(width, height, scale, rowHeight)
     local rows = self.tab == "commands" and self.commandVisibleRows or self.tab == "group" and self.groupVisibleRows or self.visibleRows
     local step = self.tab == "commands" and commandHeight or rowHeight
     self.scrollbar:SetHeight(rows * step)
+    local content = width - 80
+    self.financeContentWidth = content
+    self.financeScroll:SetPoint("TOPLEFT", self.financePanel, "TOPLEFT", 20, -149)
+    self.financeScroll:SetPoint("BOTTOMRIGHT", self.financePanel, "BOTTOMRIGHT", -42, 98)
+    self.financeChild:SetWidth(content)
+    local half = (content - 20) / 2
+    place(self.financeLabels.drop, self.financeChild, 0, 0, content)
+    place(self.financeDropValue, self.financeChild, 0, -24, content)
+    place(self.financeDropDetail, self.financeChild, 0, -49, content)
+    self.financeDropDetail:SetHeight(24)
+    place(self.financeLabels.sales, self.financeChild, 0, -80, half)
+    place(self.financeSalesValue, self.financeChild, 0, -104, half)
+    place(self.financeSalesDetail, self.financeChild, 0, -130, half)
+    self.financeSalesDetail:SetHeight(32)
+    place(self.financeLabels.net, self.financeChild, half + 20, -80, half)
+    place(self.financeNetValue, self.financeChild, half + 20, -104, half)
+    place(self.financeBuybackDetail, self.financeChild, half + 20, -130, half)
+    place(self.financeLabels.materials, self.financeChild, 0, -173, content)
+    place(self.financeMaterialsTotal, self.financeChild, 0, -198, content)
+    place(self.financeNoMaterials, self.financeChild, 0, -225, content)
 end
 
 function App:SelectEntry(entryID)
@@ -521,7 +620,7 @@ function App:SetTimer(enabled)
 end
 
 function App:ShowExport(mode, preparedText, preparedName)
-    mode = mode or (self.tab == "group" and "group" or self.tab == "commands" and "commands" or "loot")
+    mode = mode or (self.tab == "finance" and "finance" or self.tab == "group" and "group" or self.tab == "commands" and "commands" or "loot")
     if not self.exportFrame then
         local frame = movableFrame("ClassicLootLogExportFrame", 740, 470, "Export loot log")
         label(frame, "Ctrl+A, Ctrl+C: copy all text and save it outside WoW as .txt or .tsv.", 18, -52, 704)
@@ -563,6 +662,8 @@ function App:ShowExport(mode, preparedText, preparedName)
         exported = FileExport.BuildReport(self.db, self.groupAdapter.model, self:ExportOptions())
     elseif mode == "group" then
         exported = self.groupAdapter.model:Export()
+    elseif mode == "finance" then
+        exported = Finance.Export(self.db)
     elseif mode == "commands" then
         local lines = {"Command\tDescription"}
         for _, entry in ipairs(COMMANDS) do lines[table.getn(lines) + 1] = entry.command .. "\t" .. entry.description end
@@ -588,6 +689,7 @@ function App:ExportOptions()
 end
 
 function App:SaveAllLogs()
+    if self.merchant then self.merchant:Reconcile(false) end
     local result, reason = FileExport.Save(self.db, self.groupAdapter.model, self:ExportOptions())
     if not result then
         say("Export could not be prepared: " .. tostring(reason))
@@ -644,7 +746,7 @@ function App:Layout()
     place(self.timerText, frame, 340, -61, math.max(150, width - 480))
     place(self.viewButton, frame, width - 133, -54, 115)
     place(self.mobText, frame, 18, -94, width - 36)
-    place(self.status, frame, 400, -119, width - 418)
+    place(self.status, frame, 512, -119, width - 530)
     self.status:SetHeight(20 * textScale)
     place(self.headers.clock, frame, 18, -149, clockWidth)
     place(self.headers.elapsed, frame, 18 + elapsedX, -149, elapsedWidth)
@@ -789,6 +891,11 @@ function App:CreateWindow()
     self.scrollbar = slider
     frame:EnableMouseWheel(true)
     Compat.SetScript(frame, "OnMouseWheel", function(_, delta)
+        if self.tab == "finance" then
+            local offset = self.financeScroll:GetVerticalScroll() - delta * 60
+            self.financeScroll:SetVerticalScroll(math.max(0, math.min(self.financeScroll:GetVerticalScrollRange(), offset)))
+            return
+        end
         local count, visible
         if self.tab == "commands" then count, visible = table.getn(COMMANDS), self.commandVisibleRows
         elseif self.tab == "group" then count, visible = table.getn(self.groupAdapter.model:Entries()), self.groupVisibleRows
@@ -944,6 +1051,8 @@ function App:Initialize()
     ClassicLootLogDB = Core.Initialize(ClassicLootLogDB, now())
     self.db = ClassicLootLogDB
     Value.Initialize(self.db)
+    Finance.Initialize(self.db)
+    self.merchant = Merchant.New(self.db, {now = now, time = time, onChange = function() self:Refresh() end})
     self.mini = Mini.New(self.db, {now = now})
     self.groupAdapter = GroupEvents.New(self.db, {
         now = now, time = time,
@@ -961,11 +1070,12 @@ function App:Initialize()
         end,
     })
     StaticPopupDialogs[RESET_DIALOG] = {
-        text = "Reset all loot, mob counts, disenchant marks and session time?",
+        text = "Reset all loot, vendor transactions, mob counts and session time?",
         button1 = "Reset", button2 = "Cancel",
         OnAccept = function()
             Core.Reset(self.db, now())
             self.tracker:Reset()
+            self.merchant:Reset()
             self.db.groupLoot = {}
             self.groupAdapter:Reset()
             lootSession = nil
@@ -974,11 +1084,12 @@ function App:Initialize()
             self.offset = 0
             if self.exportFrame then self.exportFrame:Hide() end
             self:Refresh()
-            say("Loot, mobs, party / raid history, disenchant marks and timer reset.")
+            say("Loot, vendor transactions, mobs, party / raid history and timer reset.")
         end,
         timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
     }
     self:CreateWindow()
+    self.merchant:InstallHooks()
     self:Refresh()
     SLASH_CLASSICLOOTLOG1 = "/cll"
     SLASH_CLASSICLOOTLOG2 = "/lootlog"
@@ -1006,6 +1117,8 @@ function App:Initialize()
             self:SetTab("commands"); self.frame:Show()
         elseif command == "group" or command == "raid" then
             self:SetTab("group"); self.frame:Show()
+        elseif command == "finance" or command == "finances" then
+            self:SetTab("finance"); self.frame:Show()
         elseif command == "track" then
             self:BeginGroupItem(rawArgument ~= "" and rawArgument or nil)
         elseif command == "focus" then
@@ -1070,12 +1183,14 @@ Compat.RegisterEvent(eventFrame, "BAG_UPDATE_DELAYED")
 Compat.RegisterEvent(eventFrame, "LOOT_SLOT_CLEARED")
 Compat.RegisterEvent(eventFrame, "MERCHANT_SHOW")
 for _, eventName in ipairs(GroupEvents.Events) do Compat.RegisterEvent(eventFrame, eventName) end
+for _, eventName in ipairs(Merchant.Events) do Compat.RegisterEvent(eventFrame, eventName) end
 for _, eventName in ipairs(Tracker.LegacyEvents or {}) do
     Compat.RegisterEvent(eventFrame, eventName)
 end
 Compat.SetScript(eventFrame, "OnEvent", function(_, event, a, b, c, d)
     if App.tracker then App.tracker:HandleEvent(event, a, b, c, d) end
     if App.groupAdapter then App.groupAdapter:HandleEvent(event, a, b, c, d) end
+    if App.merchant then App.merchant:HandleEvent(event, a, b, c, d) end
     if event == "ADDON_LOADED" then
         local name = a
         if name == addonName or name == launcherAddonName then

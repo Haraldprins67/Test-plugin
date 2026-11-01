@@ -26,10 +26,10 @@ assert launcher_metadata == manual_metadata
 assert launcher_files == manual_files
 assert [path.name for path in manual_files] == [
     "Compat.lua", "Core.lua", "Tracking.lua", "Value.lua", "GroupLoot.lua", "GroupEvents.lua",
-    "Mini.lua", "FileExport.lua", "Main.lua"
+    "Finance.lua", "Merchant.lua", "Mini.lua", "FileExport.lua", "Main.lua"
 ]
 assert manual_metadata["Interface"] == "11200"
-assert manual_metadata["Version"] == "1.5.0"
+assert manual_metadata["Version"] == "1.6.0"
 assert "SellValue" in manual_metadata["OptionalDeps"].split(", ")
 assert manual_metadata["SavedVariablesPerCharacter"] == "ClassicLootLogDB"
 print("PASS launcher and manual entry points load the same version and addon files")

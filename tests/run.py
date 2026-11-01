@@ -35,6 +35,8 @@ def main() -> None:
         "tests/legacy_tracking_spec.lua",
         "tests/legacy_ui_spec.lua",
         "tests/value_spec.lua",
+        "tests/finance_spec.lua",
+        "tests/merchant_spec.lua",
         "tests/group_loot_spec.lua",
         "tests/group_events_spec.lua",
         "tests/mini_spec.lua",

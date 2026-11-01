@@ -7,6 +7,7 @@ local combatLog, bags = {}, {}
 local notices, vendorPrices = {}, {}
 local lootMethod, partyCount, raidCount = "freeforall", 0, 0
 local lootRolls = {}
+local money, buybacks, merchantAction = 100000, {}, nil
 local groupNames = {player = "Testspeler", pet = "Testpet", party1 = "Alice", party2 = "Bob", party3 = "Cara", raid1 = "Testspeler", raid2 = "Alice", raid3 = "Bob", raid4 = "Cara"}
 
 local Widget = {}
@@ -125,6 +126,8 @@ function Widget:SetHyperlink(value) self.hyperlink = value end
 
 UIParent = widget("Frame", "UIParent")
 GameTooltip = widget("GameTooltip", "GameTooltip")
+MerchantFrame = widget("Frame", "MerchantFrame")
+MerchantFrame:Hide()
 DEFAULT_CHAT_FRAME = { AddMessage = function(_, message) chat[#chat + 1] = message end }
 UIErrorsFrame = { AddMessage = function(_, message) notices[#notices + 1] = message end }
 UISpecialFrames, SlashCmdList, StaticPopupDialogs = {}, {}, {}
@@ -191,6 +194,27 @@ function GetLootRollItemInfo(rollID)
     local roll = lootRolls[rollID]
     if roll then return roll.icon or 132889, roll.name, roll.quantity or 1, roll.quality or 4, false, true, true end
 end
+function GetMoney() return money end
+function UseContainerItem(bag, index, onSelf)
+    if merchantAction then merchantAction(bag, index, onSelf) end
+    return "native-use-return"
+end
+function BuybackItem(index)
+    local entry = buybacks[index]
+    if entry then
+        bags[0] = bags[0] or {}
+        bags[0][1] = {link = entry.link, name = entry.name, quantity = entry.quantity, icon = "icon", quality = 1}
+        money = money - entry.price
+        table.remove(buybacks, index)
+    end
+    return "native-buyback-return"
+end
+function GetNumBuybackItems() return table.getn(buybacks) end
+function GetBuybackItemInfo(index)
+    local entry = buybacks[index]
+    if entry then return entry.name, "icon", entry.price, entry.quantity end
+end
+function GetBuybackItemLink(index) return buybacks[index] and buybacks[index].link end
 function GetRealmName() return "Testrealm" end
 function IsModifiedClick() return false end
 function IsShiftKeyDown() return false end
@@ -239,6 +263,8 @@ assert(loadfile("ClassicLootLog/Tracking.lua"))("ClassicLootLog", ns)
 assert(loadfile("ClassicLootLog/Value.lua"))()
 assert(loadfile("ClassicLootLog/GroupLoot.lua"))()
 assert(loadfile("ClassicLootLog/GroupEvents.lua"))()
+assert(loadfile("ClassicLootLog/Finance.lua"))()
+assert(loadfile("ClassicLootLog/Merchant.lua"))()
 assert(loadfile("ClassicLootLog/Mini.lua"))()
 assert(loadfile("ClassicLootLog/FileExport.lua"))()
 assert(loadfile("ClassicLootLog/Main.lua"))("ClassicLootLog", ns)
@@ -343,6 +369,9 @@ local function resetSession()
     if ns.App.SetView then ns.App:SetView("loot") end
     ns.App.selectedEntryID = nil
     bags, combatLog = {}, {}
+    money, buybacks, merchantAction = 100000, {}, nil
+    MerchantFrame:Hide()
+    if ns.App.merchant then ns.App.merchant:Reset() end
     lootMethod, partyCount, raidCount = "freeforall", 0, 0
     lootRolls = {}
     if ns.App.groupAdapter then
@@ -1156,6 +1185,114 @@ test("missing or failed file APIs queue a reloadable report and never claim a ve
     assert(failed.writeError, "native failure remains visible alongside the queued fallback")
     equal(#ClassicLootLogDB.pendingFileExports, before + 2)
     WriteCustomFile, ReadCustomFile = nil, nil
+end)
+
+
+test("Finances tab keeps gross drop value separate from DE results and lists every material", function()
+    resetSession()
+    ns.Value.SetPrice(ClassicLootLogDB, 2589, 100)
+    ns.Value.SetPrice(ClassicLootLogDB, 15210, 10000)
+    ns.Value.ClearPrice(ClassicLootLogDB, 999999)
+    local sword = item("Creature-finance-sword", 1)
+    sword.link, sword.name = "item:15210", "Dropped sword"
+    local unknown = item("Creature-finance-unknown", 1)
+    unknown.link, unknown.name = "item:999999", "Unpriced drop"
+    slots = {item("Creature-finance-cloth", 3), sword, unknown}
+    dispatch("LOOT_OPENED")
+    ns.Core.MarkDisenchanted(ClassicLootLogDB, "item:2589", 1, clock)
+    ns.Core.AddSnapshot(ClassicLootLogDB, {
+        {kind = "item", origin = "disenchant", link = "item:10978", name = "Small Glimmering Shard", quantity = 2, sourceGUID = "DE-shards"},
+        {kind = "item", origin = "disenchant", link = "item:10939", name = "Greater Magic Essence", quantity = 3, sourceGUID = "DE-essences"},
+    }, stamp, clock)
+    SlashCmdList.CLASSICLOOTLOG("finance")
+    equal(ns.App.tab, "finance")
+    assert(ns.App.financePanel:IsShown())
+    equal(ns.App.commandsPanel:IsShown(), false)
+    equal(ns.App.groupPanel:IsShown(), false)
+    local summary = ns.Finance.Summary(ClassicLootLogDB)
+    equal(summary.dropCopper, 10300, "DE originals remain historical drops; materials are not added to that total")
+    equal(summary.unknownDropUnits, 1)
+    equal(summary.totalMaterials, 5)
+    equal(summary.originalsDisenchanted, 1)
+    equal(summary.salesCopper, 0, "drop estimates must not become actual vendor income")
+    assert(ns.App.financeDropValue:GetText():find("1g 3s 0c", 1, true))
+    local observed = {}
+    for _, row in ipairs(ns.App.financeMaterialRows) do
+        if row:IsShown() then observed[row.item:GetText()] = row.quantity:GetText() end
+    end
+    local shard, essence
+    for name, quantity in pairs(observed) do
+        if name:find("Small Glimmering Shard", 1, true) then shard = quantity end
+        if name:find("Greater Magic Essence", 1, true) then essence = quantity end
+    end
+    equal(shard, "2")
+    equal(essence, "3")
+    ns.App:Resize(680, 430)
+    equal(ns.App.tab, "finance")
+    assert(ns.App.financePanel:IsShown())
+    ns.App:Resize(900, 590)
+end)
+
+test("actual vendor income requires sale evidence and keeps buyback separate from unrelated money", function()
+    resetSession()
+    clock = 6000
+    local link = "item:2589"
+    ns.Value.SetPrice(ClassicLootLogDB, 2589, 100)
+    bags[0] = {{link = link, name = "Linen Cloth", quantity = 2, icon = "icon", quality = 1}}
+    MerchantFrame:Show()
+    dispatch("MERCHANT_SHOW")
+    merchantAction = function(bag, index)
+        local sold = bags[bag][index]
+        buybacks = {{name = sold.name, link = sold.link, quantity = sold.quantity, price = 200}}
+        bags[bag][index] = nil
+        money = money + 200
+    end
+    equal(UseContainerItem(0, 1), "native-use-return", "passive sale hooks must preserve the native action result")
+    dispatch("PLAYER_MONEY")
+    dispatch("BAG_UPDATE", 0)
+    flushTimers()
+    local summary = ns.Finance.Summary(ClassicLootLogDB)
+    equal(summary.salesCopper, 200)
+    equal(summary.buybackCopper, 0)
+    equal(summary.netSalesCopper, 200)
+    ns.App:SetTab("finance")
+    assert(ns.App.financeSalesValue:GetText():find("0g 2s 0c", 1, true))
+    money = money + 500
+    dispatch("PLAYER_MONEY")
+    flushTimers()
+    equal(ns.Finance.Summary(ClassicLootLogDB).salesCopper, 200, "unrelated money gains at a merchant are not sales")
+    equal(BuybackItem(1), "native-buyback-return")
+    dispatch("BAG_UPDATE", 0)
+    dispatch("PLAYER_MONEY")
+    flushTimers()
+    summary = ns.Finance.Summary(ClassicLootLogDB)
+    equal(summary.salesCopper, 200)
+    equal(summary.buybackCopper, 200)
+    equal(summary.netSalesCopper, 0)
+    assert(ns.App.financeNetValue:GetText():find("0g 0s 0c", 1, true))
+    MerchantFrame:Hide()
+    dispatch("MERCHANT_CLOSED")
+    merchantAction = nil
+end)
+
+test("financial exports include actual sales and DE counts without converting estimates into income", function()
+    resetSession()
+    ns.Core.AddSnapshot(ClassicLootLogDB, {
+        {kind = "item", origin = "disenchant", link = "item:10940", name = "Strange Dust", quantity = 4, sourceGUID = "finance-export-dust"},
+    }, stamp, clock)
+    ns.App:SetTab("finance")
+    ns.App:ShowExport()
+    local exported = ns.App.exportFrame.edit:GetText()
+    assert(exported:find("Strange Dust", 1, true))
+    assert(exported:find("4", 1, true))
+    local complete = ns.FileExport.BuildReport(ClassicLootLogDB, ns.App.groupAdapter.model, ns.App:ExportOptions())
+    assert(complete:find("FINANC", 1, true), "Save all must contain the finances section")
+    assert(complete:find("Strange Dust", 1, true))
+    equal(ns.Finance.Summary(ClassicLootLogDB).salesCopper, 0)
+    SlashCmdList.CLASSICLOOTLOG("reset")
+    popup.definition.OnAccept()
+    equal(ns.Finance.Summary(ClassicLootLogDB).salesCopper, 0)
+    equal(ns.Finance.Summary(ClassicLootLogDB).totalMaterials, 0)
 end)
 
 print(string.format("%d WoW integration smoke tests passed", passed))

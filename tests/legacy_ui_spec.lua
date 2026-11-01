@@ -1,9 +1,10 @@
 -- Run unchanged in real Lua 5.0: Vanilla globals and APIs only.
-local frames, chat, slots = {}, {}, {}
+local frames, chat, slots, bags = {}, {}, {}, {}
 local clock, stamp = 100, 1700000000
 local notices, vendorPrices = {}, {}
 local lootMethod, partyCount, raidCount = "freeforall", 0, 0
 local lootRolls = {}
+local money, buybacks, merchantAction = 100000, {}, nil
 local groupNames = {player = "Testplayer", pet = "Testpet", party1 = "Alice", party2 = "Bob", party3 = "Cara"}
 local targetGUID, popup = "0xF130000001000001", nil
 local fire
@@ -114,12 +115,17 @@ end
 function Widget:GetValue() return self.value end
 function Widget:SetMinMaxValues(low, high) self.minimum, self.maximum = low, high end
 function Widget:GetMinMaxValues() return self.minimum or 0, self.maximum or 1 end
+function Widget:GetVerticalScroll() return self.scroll or 0 end
+function Widget:SetVerticalScroll(value) self.scroll = value end
+function Widget:GetVerticalScrollRange() return 500 end
 function Widget:Enable() self.enabled = true end
 function Widget:Disable() self.enabled = false end
 function Widget:IsEnabled() return self.enabled ~= false end
 
 UIParent = widget("Frame", "UIParent")
 GameTooltip = widget("GameTooltip", "GameTooltip")
+MerchantFrame = widget("Frame", "MerchantFrame")
+MerchantFrame:Hide()
 ChatFrameEditBox = widget("EditBox", "ChatFrameEditBox")
 function ChatFrameEditBox:Insert(text) self.text = self.text .. text end
 DEFAULT_CHAT_FRAME = { AddMessage = function(object, text) chat[table.getn(chat) + 1] = text end }
@@ -173,9 +179,35 @@ function UnitIsDead(unit) return unit == "target" end
 function UnitIsPlayer(unit) return unit == "player" end
 function UnitCanAttack(first, second) return second == "target" end
 function UnitIsFriend(first, second) return second ~= "target" end
-function GetContainerNumSlots() return 0 end
-function GetContainerItemInfo() return nil end
-function GetContainerItemLink() return nil end
+function GetContainerNumSlots(bag) return table.getn(bags[bag] or {}) end
+function GetContainerItemInfo(bag, index)
+    local entry = bags[bag] and bags[bag][index]
+    if entry then return entry.icon or "icon", entry.quantity, false, entry.quality, false, false, entry.link end
+end
+function GetContainerItemLink(bag, index)
+    return bags[bag] and bags[bag][index] and bags[bag][index].link
+end
+function GetMoney() return money end
+function UseContainerItem(bag, index, onSelf)
+    if merchantAction then merchantAction(bag, index, onSelf) end
+    return "native-use-return"
+end
+function BuybackItem(index)
+    local entry = buybacks[index]
+    if entry then
+        bags[0] = bags[0] or {}
+        bags[0][1] = {link = entry.link, name = entry.name, quantity = entry.quantity, icon = "icon", quality = 1}
+        money = money - entry.price
+        table.remove(buybacks, index)
+    end
+    return "native-buyback-return"
+end
+function GetNumBuybackItems() return table.getn(buybacks) end
+function GetBuybackItemInfo(index)
+    local entry = buybacks[index]
+    if entry then return entry.name, "icon", entry.price, entry.quantity end
+end
+function GetBuybackItemLink(index) return buybacks[index] and buybacks[index].link end
 function IsShiftKeyDown() return false end
 function GetNumPartyMembers() return partyCount end
 function GetNumRaidMembers() return raidCount end
@@ -229,6 +261,8 @@ assert(loadfile("ClassicLootLog/Tracking.lua"))()
 assert(loadfile("ClassicLootLog/Value.lua"))()
 assert(loadfile("ClassicLootLog/GroupLoot.lua"))()
 assert(loadfile("ClassicLootLog/GroupEvents.lua"))()
+assert(loadfile("ClassicLootLog/Finance.lua"))()
+assert(loadfile("ClassicLootLog/Merchant.lua"))()
 assert(loadfile("ClassicLootLog/Mini.lua"))()
 assert(loadfile("ClassicLootLog/FileExport.lua"))()
 assert(loadfile("ClassicLootLog/Main.lua"))()
@@ -246,7 +280,10 @@ local function reset()
     popup.OnAccept()
     ns.App:SetView("loot")
     if ClassicLootLogDB.timer.enabled then SlashCmdList.CLASSICLOOTLOG("timer off") end
-    slots = {}
+    slots, bags = {}, {}
+    money, buybacks, merchantAction = 100000, {}, nil
+    MerchantFrame:Hide()
+    if ns.App.merchant then ns.App.merchant:Reset() end
     lootMethod, partyCount, raidCount = "freeforall", 0, 0
     lootRolls = {}
 end
@@ -611,6 +648,69 @@ test("Vanilla save-all without a patch persists a queue for the Lootlogs helper 
     equal(saved.provider, "SavedVariables")
     equal(table.getn(ClassicLootLogDB.pendingFileExports), before + 1)
     assert(string.find(ClassicLootLogDB.pendingFileExports[table.getn(ClassicLootLogDB.pendingFileExports)], "CLLEXPORT1:", 1, true))
+end)
+
+
+test("Vanilla Finances tab shows gross gold silver copper and material totals", function()
+    reset()
+    ns.Value.SetPrice(ClassicLootLogDB, 2589, 100)
+    targetGUID = "0xF13000FINANCE001"
+    slots = {item(3, 2589, "Finance Linen")}
+    dispatch("LOOT_OPENED")
+    ns.Core.MarkDisenchanted(ClassicLootLogDB, "item:2589", 1, clock)
+    ns.Core.AddSnapshot(ClassicLootLogDB, {
+        {kind = "item", origin = "disenchant", link = "item:10978", name = "Small Glimmering Shard", quantity = 2, sourceGUID = "finance-shard"},
+        {kind = "item", origin = "disenchant", link = "item:10939", name = "Greater Magic Essence", quantity = 3, sourceGUID = "finance-essence"},
+    }, stamp, clock)
+    SlashCmdList.CLASSICLOOTLOG("finance")
+    equal(ns.App.tab, "finance")
+    assert(ns.App.financePanel:IsShown())
+    equal(ns.Finance.Summary(ClassicLootLogDB).dropCopper, 300)
+    equal(ns.Finance.Summary(ClassicLootLogDB).totalMaterials, 5)
+    assert(string.find(ns.App.financeDropValue:GetText(), "0g 3s 0c", 1, true))
+    local foundShard, foundEssence = false, false
+    for _, row in ipairs(ns.App.financeMaterialRows) do
+        if row:IsShown() then
+            if string.find(row.item:GetText(), "Small Glimmering Shard", 1, true) then foundShard = row.quantity:GetText() == "2" end
+            if string.find(row.item:GetText(), "Greater Magic Essence", 1, true) then foundEssence = row.quantity:GetText() == "3" end
+        end
+    end
+    assert(foundShard and foundEssence)
+end)
+
+test("Vanilla sale hooks confirm real income through old money and bag events", function()
+    reset()
+    clock = 7000
+    ns.Value.SetPrice(ClassicLootLogDB, 2589, 100)
+    bags[0] = {{link = "item:2589", name = "Linen Cloth", quantity = 2, icon = "icon", quality = 1}}
+    MerchantFrame:Show()
+    dispatch("MERCHANT_SHOW")
+    merchantAction = function(bag, index)
+        local sold = bags[bag][index]
+        buybacks = {{name = sold.name, link = sold.link, quantity = sold.quantity, price = 200}}
+        bags[bag][index] = nil
+        money = money + 200
+    end
+    equal(UseContainerItem(0, 1), "native-use-return")
+    dispatch("BAG_UPDATE", 0)
+    dispatch("PLAYER_MONEY")
+    tick(0.3)
+    equal(ns.Finance.Summary(ClassicLootLogDB).salesCopper, 200)
+    money = money + 500
+    dispatch("PLAYER_MONEY")
+    tick(0.3)
+    equal(ns.Finance.Summary(ClassicLootLogDB).salesCopper, 200)
+    ns.App:SetTab("finance")
+    assert(string.find(ns.App.financeSalesValue:GetText(), "0g 2s 0c", 1, true))
+    equal(BuybackItem(1), "native-buyback-return")
+    dispatch("PLAYER_MONEY")
+    dispatch("BAG_UPDATE", 0)
+    tick(0.3)
+    equal(ns.Finance.Summary(ClassicLootLogDB).buybackCopper, 200)
+    equal(ns.Finance.Summary(ClassicLootLogDB).netSalesCopper, 0)
+    MerchantFrame:Hide()
+    dispatch("MERCHANT_CLOSED")
+    merchantAction = nil
 end)
 
 print(passed .. " legacy UI tests passed")

@@ -86,7 +86,7 @@ function FileExport.BuildReport(db, groupModel, options)
         return formatDate(options, "%Y-%m-%d %H:%M:%S", value)
     end
     local lines = {
-        "Classic Loot Log export\t1.5.0",
+        "Classic Loot Log export\t1.6.0",
         "Logged by\t" .. cleanText(playerName(options)),
         "Exported\t" .. cleanText(dateTime(stamp)),
         "Scope\tAll currently retained records for this character, not only the visible tab.",
@@ -104,6 +104,9 @@ function FileExport.BuildReport(db, groupModel, options)
     else
         lines[getn(lines) + 1] = "Party / raid exporter unavailable."
     end
+    lines[getn(lines) + 1] = ""
+    lines[getn(lines) + 1] = "=== FINANCES, VENDOR SALES AND DISENCHANT MATERIALS ==="
+    if ns.Finance and ns.Finance.Export then lines[getn(lines) + 1] = ns.Finance.Export(db) end
     lines[getn(lines) + 1] = ""
     lines[getn(lines) + 1] = "=== OBSERVED MOB KILLS ==="
     lines[getn(lines) + 1] = "Date/time\tSession time\tName\tGUID"

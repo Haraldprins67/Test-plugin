@@ -1,8 +1,8 @@
 # Classic Loot Log — OctoWoW
 
-**Version 1.5.0** targets **OctoWoW's WoW 1.12.1 / Lua 5.0 client** (`Interface: 11200`). It provides an English interface using the original WoW dialog background, decorative border, gold headings and standard buttons.
+**Version 1.6.0** targets **OctoWoW's WoW 1.12.1 / Lua 5.0 client** (`Interface: 11200`). It provides an English interface using the original WoW dialog background, decorative border, gold headings and standard buttons.
 
-**[Download ClassicLootLog-1.5.0-OctoWoW.zip](downloads/ClassicLootLog-1.5.0-OctoWoW.zip?raw=true)**
+**[Download ClassicLootLog-1.6.0-OctoWoW.zip](downloads/ClassicLootLog-1.6.0-OctoWoW.zip?raw=true)**
 
 ## Install or update
 
@@ -41,6 +41,24 @@ Core.lua:1: unexpected symbol near '...'
 Version 1.2.1 removes the unsupported `SetObeyStepOnDrag` slider call entirely. Legacy client detection also checks the available loot APIs, so a custom/newer display version or a GUID backport does not select incompatible functions. This fixes the reported `Main.lua:286` startup error on modified OctoWoW clients.
 
 Version 1.2.1 uses Lua 5.0 syntax throughout the addon files, a shared namespace that does not rely on chunk arguments, old-style event globals, legacy loot APIs, and a frame-based timer fallback. OctoWoW's optional GUID return from `UnitExists(unit)` is used when available; no Nampower installation is required by this addon.
+
+## Finances tab
+
+Open **Finances** or type **`/cll finance`**. This tab separates the three figures that should not be mixed together:
+
+1. **Original drop vendor value:** the known vendor-price subtotal of all original item quantities in the loot history, displayed as gold, silver and copper. Items later disenchanted still retain their original historical drop value. Disenchant materials, looted coins and currencies are not added to this original-drop subtotal. SellValue, manual overrides and the existing price providers supply estimates; unknown-price units are counted explicitly rather than treated as a complete zero-valued total.
+2. **Actual vendor sales (gross):** income from confirmed sales while this addon is running. **Net vendor income** additionally subtracts confirmed buybacks, which are shown separately. These are recorded transactions, not a conversion of the estimated loot value or a change in your overall character balance.
+3. **Disenchant materials produced:** a list of the actual observed essences, shards, dust and other materials with their quantities. These are produced-history counts, not current inventory; selling the resulting material does not erase the fact it was produced.
+
+The tab scrolls when the window is small or there are many material types. Its values use explicit gold/silver/copper denominations, including zeros. **Export log** from this tab exports the financial ledger; **Save all** includes the same summary and transaction details in the complete report.
+
+### How confirmed vendor income is recorded
+
+The observer watches right-click sales, normal bag-to-vendor drag sales, split-stack cursor sales, inventory changes, the character's money and newly created buyback entries. The stock 1.12 drag path uses `PickupMerchantItem(0)`; supported clients exposing `SellCursorItem` are also observed. A fresh buyback entry can confirm the actual price even when auto-repair reduces your balance in the same batch. When that evidence is unavailable, a matching known unit price, removed item quantity and exact money gain are required. Multiple known sales can be reconciled as one batch.
+
+Looted money, quest rewards, trades, repairs and arbitrary balance increases with no observed sale action do not become vendor income. Ambiguous or incomplete transactions are kept in an **unconfirmed** ledger and excluded from confirmed totals; the count appears in the tab and the reasons are included in the export. The observer never clicks, sells or buys items itself.
+
+Sales of items that were already in your bags are included even if their original drop was not in this addon's history. The financial ledger starts with this version: earlier actual sales cannot be reconstructed retroactively. Confirmed sales and buybacks persist between logins; **Reset** clears the session ledger along with loot and mob history, while preserving UI preferences and price overrides.
 
 ## Compact `/sl` window
 
@@ -84,7 +102,7 @@ Use `--once` instead of `--watch` for a single scan. Stop watch mode with Ctrl+C
 
 ## Tabs and party / raid loot
 
-The main window has **Loot**, **Commands**, and **Party / Raid** tabs. **Commands** is a scrollable reference to every primary command and its arguments. The decorative title is now centered inside its header and retains that anchor while resizing.
+The main window has **Loot**, **Commands**, **Party / Raid** and **Finances** tabs. **Commands** is a scrollable reference to every primary command and its arguments. The decorative title is now centered inside its header and retains that anchor while resizing.
 
 **Party / Raid** keeps an observed item history with the distribution method, recipient, winning EP/GP bid where available, and the two highest eligible rollers. Click an item to inspect every recorded Need/Greed/Pass choice, roll, bid and receipt. The detail area scrolls independently. **Export log → Party / Raid** exports the complete history, including unresolved receipts.
 
@@ -137,6 +155,7 @@ The list records loot while the window is hidden and while the timer is paused. 
 | `/cll save` | Prepare all logs for file export, independent of the selected tab |
 | `/cll show` / `/cll hide` | Show / hide the window |
 | `/cll stats` | Show item shares |
+| `/cll finance` or `/cll finances` | Show original-drop values, actual sales and disenchant materials |
 | `/cll commands` or `/cll help` | Show the command reference |
 | `/cll group` or `/cll raid` | Open the party / raid tracker |
 | `/cll track ITEMLINK` | Start/focus an item for master loot or EP/GP bidding |
@@ -231,7 +250,7 @@ There is no fixed history limit. Export and reset periodically during long sessi
 
 ## Development and validation
 
-WoW loads `Compat.lua`, `Core.lua`, `Tracking.lua`, `Value.lua`, `GroupLoot.lua`, `GroupEvents.lua`, `Mini.lua`, `FileExport.lua` and `Main.lua` in that order. The manual and launcher TOCs reference the same files. No build or runtime dependencies are needed by the addon. Use the existing checkout in cloud tasks; they are already isolated and do not need extra Git worktrees.
+WoW loads `Compat.lua`, `Core.lua`, `Tracking.lua`, `Value.lua`, `GroupLoot.lua`, `GroupEvents.lua`, `Finance.lua`, `Merchant.lua`, `Mini.lua`, `FileExport.lua` and `Main.lua` in that order. The manual and launcher TOCs reference the same files. No build or runtime dependencies are needed by the addon. Use the existing checkout in cloud tasks; they are already isolated and do not need extra Git worktrees.
 
 The Python test runner uses Lupa for Lua 5.1 regression tests:
 
@@ -264,3 +283,5 @@ Also test resizing small/large, locking the grip, toggling Auto text, retaining 
 For party/raid validation, test a native Need/Greed roll including a tied score, master-loot /roll with an explicitly focused item, case/punctuation variants of MIN/NEED/MAX followed by an actual receipt, and two identical simultaneous item links that must remain ambiguous. Verify that no chat or loot actions are sent by the tracker.
 
 For file-export validation, run the helper from your installed addon tools folder, export once through a supported native writer and once through the SavedVariables fallback, and verify that filenames contain the click time and player name. Test a second same-second export without overwriting the first. Confirm `/sl` still updates with the main window hidden.
+
+For financial validation, sell a known stack, sell multiple stacks with auto-repair, buy an item back, receive unrelated money with a vendor open, and compare the confirmed gross/net values. Disenchant a logged original and check that its gross drop value remains while the produced essence/shard counts increase. Verify financial export and persistence across reload.
