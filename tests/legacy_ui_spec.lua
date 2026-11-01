@@ -265,6 +265,9 @@ assert(loadfile("ClassicLootLog/Finance.lua"))()
 assert(loadfile("ClassicLootLog/Merchant.lua"))()
 assert(loadfile("ClassicLootLog/Mini.lua"))()
 assert(loadfile("ClassicLootLog/FileExport.lua"))()
+assert(loadfile("ClassicLootLog/SavedLogs.lua"))()
+assert(loadfile("ClassicLootLog/MinimapButton.lua"))()
+assert(loadfile("ClassicLootLog/LogsPanel.lua"))()
 assert(loadfile("ClassicLootLog/Main.lua"))()
 local ns = ClassicLootLogNS
 local passed = 0
@@ -604,7 +607,7 @@ test("Vanilla mini window refreshes via global OnUpdate arguments while the full
     ns.App.mini:Hide()
 end)
 
-test("Vanilla save-all verifies patched ExportFile output and keeps the date time player filename", function()
+test("Vanilla save-all archives all tabs and opens the saved report without a file patch", function()
     reset()
     stamp = 1700000000
     targetGUID = "0xF13000000100E001"
@@ -614,40 +617,67 @@ test("Vanilla save-all verifies patched ExportFile output and keeps the date tim
     ns.App.groupAdapter.model:AddBid(context, "Bob", "NEED")
     ns.App.groupAdapter.model:Award(context.link, "Bob", {contextID = context.id})
     ns.App:SetTab("commands")
-    local files, written = {}, {}
-    WriteCustomFile, ReadCustomFile = nil, nil
-    ExportFile = function(path, contents)
-        files[path] = contents
-        written[table.getn(written) + 1] = path
-        -- A void writer is only considered verified after matching readback.
-    end
-    ImportFile = function(path) return files[path] end
-    ns.App:ShowExport()
-    assert(ns.App.saveLogsButton and ns.App.saveLogsButton:GetScript("OnClick"))
+    WriteCustomFile, ReadCustomFile, ExportFile, ImportFile = nil, nil, nil, nil
+    local before = table.getn(ns.SavedLogs.Entries(ClassicLootLogDB))
     local saved = ns.App:SaveAllLogs()
-    assert(saved and saved.verified and not saved.queued)
-    equal(saved.provider, "ExportFile")
-    assert(string.find(saved.filename, "_Testplayer.txt", 1, true))
-    assert(string.find(saved.path, "imports", 1, true))
-    assert(string.find(saved.filename, "^%d%d%d%d%-%d%d%-%d%d_%d%d%-%d%d%-%d%d_"))
-    local report = files[written[1]]
-    assert(string.find(report, "Export Linen", 1, true))
-    assert(string.find(report, "Export Party Item", 1, true))
-    assert(string.find(report, "Bob", 1, true))
-    assert(string.find(report, "NEED", 1, true))
-    ExportFile, ImportFile = nil, nil
+    assert(saved and saved.id and saved.text)
+    assert(string.find(saved.title, "_Testplayer", 1, true))
+    assert(string.find(saved.title, "^%d%d%d%d%-%d%d%-%d%d_%d%d%-%d%d%-%d%d_"))
+    equal(table.getn(ns.SavedLogs.Entries(ClassicLootLogDB)), before + 1)
+    equal(ns.App.tab, "logs")
+    assert(ns.App.savedLogsPanel.frame:IsShown())
+    equal(ns.App.savedLogsPanel.selectedID, saved.id)
+    equal(ns.App.savedLogsPanel.edit:GetText(), saved.text)
+    assert(string.find(saved.text, "Export Linen", 1, true))
+    assert(string.find(saved.text, "Export Party Item", 1, true))
+    assert(string.find(saved.text, "Bob", 1, true))
+    assert(string.find(saved.text, "NEED", 1, true))
+    equal(ClassicLootLogDB.pendingFileExports, nil)
 end)
 
-test("Vanilla save-all without a patch persists a queue for the Lootlogs helper after reload", function()
+test("Vanilla archived reports survive reset and reopen unchanged through the Saved Logs tab", function()
     reset()
-    WriteCustomFile, ReadCustomFile, ExportFile, ImportFile = nil, nil, nil, nil
-    local before = table.getn(ClassicLootLogDB.pendingFileExports or {})
+    targetGUID = "0xF13000000100E002"
+    slots = {item(4, 2589, "Preserved Linen")}
+    dispatch("LOOT_OPENED")
+    local function forbidden() error("saving inside the addon must not use a file API") end
+    WriteCustomFile, ReadCustomFile, ExportFile, ImportFile = forbidden, forbidden, forbidden, forbidden
     local saved = ns.App:SaveAllLogs()
-    assert(saved and saved.queued and saved.needsReload)
-    equal(saved.verified, false)
-    equal(saved.provider, "SavedVariables")
-    equal(table.getn(ClassicLootLogDB.pendingFileExports), before + 1)
-    assert(string.find(ClassicLootLogDB.pendingFileExports[table.getn(ClassicLootLogDB.pendingFileExports)], "CLLEXPORT1:", 1, true))
+    local text = saved.text
+    reset()
+    equal(table.getn(ClassicLootLogDB.entries), 0)
+    equal(ns.SavedLogs.Get(ClassicLootLogDB, saved.id).text, text)
+    local nextLog = ns.App:SaveAllLogs()
+    assert(nextLog.id ~= saved.id)
+    assert(nextLog.title ~= saved.title)
+    equal(saved.text, text)
+    assert(string.find(saved.text, "Preserved Linen", 1, true))
+    assert(not string.find(nextLog.text, "Preserved Linen", 1, true))
+    ns.App.frame:Hide()
+    SlashCmdList.CLASSICLOOTLOG("logs")
+    equal(ns.App.tab, "logs")
+    equal(ns.App.frame:IsShown(), true)
+    local found = false
+    for _, row in ipairs(ns.App.savedLogsPanel.rows) do
+        if rawget(row, "entry") and row.entry.id == saved.id then
+            fire(row, "OnClick", "LeftButton")
+            found = true
+        end
+    end
+    assert(found, "the archived report must remain selectable after a session reset")
+    equal(ns.App.savedLogsPanel.selectedID, saved.id)
+    equal(ns.App.savedLogsPanel.edit:GetText(), text)
+    ns.App.savedLogsPanel.reportScroll:SetVerticalScroll(53)
+    ns.App:Refresh()
+    equal(ns.App.savedLogsPanel.reportScroll:GetVerticalScroll(), 53)
+    ns.App.savedLogsPanel.edit:SetText("An accidental edit")
+    fire(ns.App.savedLogsPanel.edit, "OnTextChanged")
+    equal(ns.App.savedLogsPanel.edit:GetText(), text)
+    equal(ns.SavedLogs.Get(ClassicLootLogDB, saved.id).text, text)
+    ns.App:Resize(680, 430)
+    equal(ns.App.savedLogsPanel.edit:GetText(), text)
+    ns.App:Resize(900, 590)
+    WriteCustomFile, ReadCustomFile, ExportFile, ImportFile = nil, nil, nil, nil
 end)
 
 

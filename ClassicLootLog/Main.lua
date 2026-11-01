@@ -13,6 +13,9 @@ local Finance = ns.Finance
 local Merchant = ns.Merchant
 local Mini = ns.Mini
 local FileExport = ns.FileExport
+local SavedLogs = ns.SavedLogs
+local MinimapButton = ns.MinimapButton
+local LogsPanel = ns.LogsPanel
 local App = {}
 ns.App = App
 
@@ -25,8 +28,9 @@ local COMMANDS = {
     {command = "/cll finance", description = "Show original-drop value, confirmed vendor income and disenchant materials."},
     {command = "/cll stats", description = "Show item shares in the loot tab."},
     {command = "/cll reset", description = "Confirm clearing session loot, mobs and party / raid history."},
-    {command = "/cll log", description = "Export the current tab; select another export with its buttons."},
-    {command = "/cll save", description = "Save all logs for the local Lootlogs exporter; a reload is needed without a file API."},
+    {command = "/cll log", description = "Open a copyable text report for the current tab."},
+    {command = "/cll save", description = "Save a full snapshot in Saved Logs; no external program is needed."},
+    {command = "/cll logs", description = "Open Saved Logs to review previously saved session reports."},
     {command = "/cll timer [on|off]", description = "Start, pause or toggle the session stopwatch."},
     {command = "/cll scale [on|off]", description = "Enable, disable or toggle automatic text scaling."},
     {command = "/cll lock [on|off]", description = "Lock, unlock or toggle window resizing."},
@@ -152,6 +156,7 @@ function App:Refresh()
     if self.tab == "commands" then self:RefreshCommands(); return end
     if self.tab == "group" then self:RefreshGroup(); return end
     if self.tab == "finance" then self:RefreshFinance(); return end
+    if self.tab == "logs" then self:RefreshSavedLogs(); return end
     local db = self.db
     local stats = Core.ItemStats(db)
     local percentages = {}
@@ -231,7 +236,7 @@ function App:GetCommands()
 end
 
 function App:SetTab(tab)
-    if tab ~= "commands" and tab ~= "group" and tab ~= "finance" then tab = "loot" end
+    if tab ~= "commands" and tab ~= "group" and tab ~= "finance" and tab ~= "logs" then tab = "loot" end
     self.tab, self.offset = tab, 0
     if tab == "finance" and self.financeScroll then self.financeScroll:SetVerticalScroll(0) end
     self:Layout()
@@ -248,7 +253,8 @@ function App:UpdateTabControls()
     visible(self.commandsPanel, tab == "commands")
     visible(self.groupPanel, tab == "group")
     visible(self.financePanel, tab == "finance")
-    visible(self.scrollbar, tab ~= "finance")
+    visible(self.savedLogsPanel.frame, tab == "logs")
+    visible(self.scrollbar, tab ~= "finance" and tab ~= "logs")
     visible(self.viewButton, tab == "loot")
     visible(self.empty, tab == "loot")
     visible(self.selectionText, tab == "loot")
@@ -260,8 +266,15 @@ function App:UpdateTabControls()
     self.footer:SetText(tab == "group"
         and "Focus an item for unlinked bids or /roll. Need outranks Greed. A receipt confirms the recipient."
         or tab == "finance" and "Drop value is an estimate. Vendor income counts confirmed sales; DE materials show produced quantities."
+        or tab == "logs" and "Saved snapshots survive session resets. WoW writes them to disk on logout or /reload."
         or tab == "commands" and "Optional arguments in [brackets] may be omitted to toggle a setting. Prices are copper per item."
         or "Mobs/hour uses timed kills. Item % uses original items. Drag the lower-right corner to resize.")
+end
+
+function App:RefreshSavedLogs()
+    local entries = SavedLogs.Entries(self.db)
+    self.status:SetText(tostring(table.getn(entries)) .. " saved logs")
+    self.savedLogsPanel:Refresh()
 end
 
 function App:RefreshFinance()
@@ -454,11 +467,13 @@ end
 
 function App:CreateExtraTabs(frame)
     self.tabButtons = {
-        loot = button(frame, "Loot", 90, 18, -112, function() self:SetTab("loot") end),
-        commands = button(frame, "Commands", 120, 116, -112, function() self:SetTab("commands") end),
-        group = button(frame, "Party / Raid", 140, 244, -112, function() self:SetTab("group") end),
-        finance = button(frame, "Finances", 104, 392, -112, function() self:SetTab("finance") end),
+        loot = button(frame, "Loot", 64, 18, -112, function() self:SetTab("loot") end),
+        commands = button(frame, "Commands", 96, 88, -112, function() self:SetTab("commands") end),
+        group = button(frame, "Party / Raid", 106, 190, -112, function() self:SetTab("group") end),
+        finance = button(frame, "Finances", 88, 302, -112, function() self:SetTab("finance") end),
+        logs = button(frame, "Saved Logs", 102, 396, -112, function() self:SetTab("logs") end),
     }
+    self.savedLogsPanel = LogsPanel.New(frame, self.db, {save = function() return self:SaveAllLogs() end})
     self.commandsPanel = CreateFrame("Frame", nil, frame)
     self.groupPanel = CreateFrame("Frame", nil, frame)
     self.financePanel = CreateFrame("Frame", nil, frame)
@@ -584,6 +599,7 @@ function App:LayoutExtraTabs(width, height, scale, rowHeight)
     place(self.financeLabels.materials, self.financeChild, 0, -173, content)
     place(self.financeMaterialsTotal, self.financeChild, 0, -198, content)
     place(self.financeNoMaterials, self.financeChild, 0, -225, content)
+    self.savedLogsPanel:Layout(width, height, scale)
 end
 
 function App:SelectEntry(entryID)
@@ -620,11 +636,17 @@ function App:SetTimer(enabled)
 end
 
 function App:ShowExport(mode, preparedText, preparedName)
+    if self.tab == "logs" and not mode and not preparedText then
+        local selected = self.savedLogsPanel.selectedID
+        local entry = selected and SavedLogs.Get(self.db, selected)
+        if not entry then say("Save a log first, then select it in Saved Logs."); return end
+        preparedText, preparedName = entry.text, entry.title
+    end
     mode = mode or (self.tab == "finance" and "finance" or self.tab == "group" and "group" or self.tab == "commands" and "commands" or "loot")
     if not self.exportFrame then
-        local frame = movableFrame("ClassicLootLogExportFrame", 740, 470, "Export loot log")
-        label(frame, "Ctrl+A, Ctrl+C: copy all text and save it outside WoW as .txt or .tsv.", 18, -52, 704)
-        label(frame, "WoW also saves the full list on logout or /reload (SavedVariables).", 18, -74, 704)
+        local frame = movableFrame("ClassicLootLogExportFrame", 740, 470, "Copy loot report")
+        label(frame, "Ctrl+A, Ctrl+C: copy this report. Use Save log to keep a full snapshot inside CLL.", 18, -52, 704)
+        label(frame, "Read saved reports in the Saved Logs tab; no external program is needed.", 18, -74, 704)
         frame.fileName = label(frame, "", 18, -96, 704)
         local scroll = CreateFrame("ScrollFrame", "ClassicLootLogExportScrollFrame", frame, "UIPanelScrollFrameTemplate")
         scroll:SetPoint("TOPLEFT", frame, "TOPLEFT", 20, -122)
@@ -650,7 +672,7 @@ function App:ShowExport(mode, preparedText, preparedName)
         button(frame, "Statistics", 110, 280, -432, function() self:ShowExport("stats") end)
         button(frame, "Party / Raid", 110, 400, -432, function() self:ShowExport("group") end)
         button(frame, "Commands", 100, 520, -432, function() self:ShowExport("commands") end)
-        self.saveLogsButton = button(frame, "Save all", 90, 630, -432, function() self:SaveAllLogs() end)
+        self.saveLogsButton = button(frame, "Save log", 90, 630, -432, function() self:SaveAllLogs() end)
         Compat.SetScript(frame, "OnHide", function() edit:ClearFocus() end)
         self.exportFrame = frame
     end
@@ -674,7 +696,7 @@ function App:ShowExport(mode, preparedText, preparedName)
         exported = Value.AppendExportColumns(self.db, Core.Export(self.db, formatTimestamp))
     end
     local name = preparedName or FileExport.FileName(self:ExportOptions())
-    self.exportFrame.fileName:SetText("File: " .. (name or "Unknown"))
+    self.exportFrame.fileName:SetText("Report: " .. (name or "Unknown"))
     self.exportFrame.edit:SetText(exported)
     self.exportFrame.edit:SetFocus()
     self.exportFrame.edit:HighlightText()
@@ -690,20 +712,22 @@ end
 
 function App:SaveAllLogs()
     if self.merchant then self.merchant:Reconcile(false) end
-    local result, reason = FileExport.Save(self.db, self.groupAdapter.model, self:ExportOptions())
-    if not result then
-        say("Export could not be prepared: " .. tostring(reason))
+    local options = self:ExportOptions()
+    local report, reason = FileExport.BuildReport(self.db, self.groupAdapter.model, options)
+    if not report then
+        say("Log could not be prepared: " .. tostring(reason))
         return nil, reason
     end
-    self:ShowExport("all", result.text, result.filename)
-    if result.queued then
-        say("All logs queued as " .. result.filename .. ". Use /reload after active rolls finish (or log out), then run the local Lootlogs exporter.")
-    elseif result.verified then
-        local source = result.pathVerified and result.path or ("the patch export area (" .. result.provider .. ")")
-        say("All logs verified in " .. source .. ". The local exporter copies them into Lootlogs as " .. result.filename .. ".")
-    else
-        say("Export requested but not verified. The copyable full report remains open.")
+    local result, reason = SavedLogs.Save(self.db, report, options)
+    if not result then
+        say("Log could not be saved: " .. tostring(reason))
+        return nil, reason
     end
+    if self.exportFrame then self.exportFrame:Hide() end
+    self.savedLogsPanel:Refresh(result.id)
+    self:SetTab("logs")
+    self.frame:Show()
+    say("Saved " .. result.title .. " in Saved Logs. It is written to disk on logout or /reload.")
     return result
 end
 
@@ -827,7 +851,7 @@ function App:CreateWindow()
     if frame.SetMinResize then frame:SetMinResize(MIN_WIDTH, MIN_HEIGHT) end
     if frame.SetMaxResize then frame:SetMaxResize(MAX_WIDTH, MAX_HEIGHT) end
     self.resetButton = button(frame, "Reset", 84, 18, -54, function() self:RequestReset() end)
-    self.exportButton = button(frame, "Export log", 106, 108, -54, function() self:ShowExport() end)
+    self.exportButton = button(frame, "Save log", 106, 108, -54, function() self:SaveAllLogs() end)
     self.timerButton = button(frame, "Timer: OFF", 106, 220, -54, function()
         self:SetTimer(not self.db.timer.enabled)
     end)
@@ -891,6 +915,7 @@ function App:CreateWindow()
     self.scrollbar = slider
     frame:EnableMouseWheel(true)
     Compat.SetScript(frame, "OnMouseWheel", function(_, delta)
+        if self.tab == "logs" then return end
         if self.tab == "finance" then
             local offset = self.financeScroll:GetVerticalScroll() - delta * 60
             self.financeScroll:SetVerticalScroll(math.max(0, math.min(self.financeScroll:GetVerticalScrollRange(), offset)))
@@ -1052,6 +1077,7 @@ function App:Initialize()
     self.db = ClassicLootLogDB
     Value.Initialize(self.db)
     Finance.Initialize(self.db)
+    SavedLogs.Initialize(self.db)
     self.merchant = Merchant.New(self.db, {now = now, time = time, onChange = function() self:Refresh() end})
     self.mini = Mini.New(self.db, {now = now})
     self.groupAdapter = GroupEvents.New(self.db, {
@@ -1089,6 +1115,7 @@ function App:Initialize()
         timeout = 0, whileDead = true, hideOnEscape = true, preferredIndex = 3,
     }
     self:CreateWindow()
+    self.minimapButton = MinimapButton.New(self.db, {toggle = function() self:Toggle() end})
     self.merchant:InstallHooks()
     self:Refresh()
     SLASH_CLASSICLOOTLOG1 = "/cll"
@@ -1113,6 +1140,7 @@ function App:Initialize()
         elseif command == "reset" then self:RequestReset()
         elseif command == "log" then self:ShowExport()
         elseif command == "save" then self:SaveAllLogs()
+        elseif command == "logs" then self:SetTab("logs"); self.frame:Show()
         elseif command == "commands" or command == "help" then
             self:SetTab("commands"); self.frame:Show()
         elseif command == "group" or command == "raid" then

@@ -267,6 +267,9 @@ assert(loadfile("ClassicLootLog/Finance.lua"))()
 assert(loadfile("ClassicLootLog/Merchant.lua"))()
 assert(loadfile("ClassicLootLog/Mini.lua"))()
 assert(loadfile("ClassicLootLog/FileExport.lua"))()
+assert(loadfile("ClassicLootLog/SavedLogs.lua"))()
+assert(loadfile("ClassicLootLog/MinimapButton.lua"))()
+assert(loadfile("ClassicLootLog/LogsPanel.lua"))()
 assert(loadfile("ClassicLootLog/Main.lua"))("ClassicLootLog", ns)
 local passed = 0
 local function test(name, callback)
@@ -1122,7 +1125,7 @@ test("compact metrics keep updating while the main window is hidden and share pa
     ns.App.mini:Hide()
 end)
 
-test("save-all button writes and verifies the complete character report rather than the visible tab", function()
+test("save-all archives the complete character report and opens Saved Logs without a file API", function()
     resetSession()
     stamp = 1700000000
     local sword = item("Creature-file-sword", 1)
@@ -1134,23 +1137,18 @@ test("save-all button writes and verifies the complete character report rather t
     ns.App.groupAdapter.model:Award(group.link, "Alice", {contextID = group.id})
     local open = ns.App.groupAdapter.model:StartItem(groupLink(18816, "Still Open Item"), "master")
     ns.App:SetTab("commands")
-    local files, written = {}, {}
-    ExportFile, ImportFile = nil, nil
-    WriteCustomFile = function(path, contents)
-        files[path] = contents
-        written[#written + 1] = path
-        return true
-    end
-    ReadCustomFile = function(path) return files[path] end
-    ns.App:ShowExport()
-    assert(ns.App.saveLogsButton and ns.App.saveLogsButton:GetScript("OnClick"), "export dialog must provide a save-all button")
+    WriteCustomFile, ReadCustomFile, ExportFile, ImportFile = nil, nil, nil, nil
+    local before = #ns.SavedLogs.Entries(ClassicLootLogDB)
     local result = ns.App:SaveAllLogs()
-    assert(result and result.verified and not result.queued)
-    equal(result.provider, "WriteCustomFile")
-    assert(result.filename:find("_Testspeler.txt", 1, true))
-    assert(result.filename:match("^%d%d%d%d%-%d%d%-%d%d_%d%d%-%d%d%-%d%d_"))
-    assert(result.path:find("CustomData", 1, true), "report the patch's actual destination, not root Lootlogs")
-    local report = files[written[1]]
+    assert(result and result.id and result.text)
+    assert(result.title:find("_Testspeler", 1, true))
+    assert(result.title:match("^%d%d%d%d%-%d%d%-%d%d_%d%d%-%d%d%-%d%d_"))
+    equal(#ns.SavedLogs.Entries(ClassicLootLogDB), before + 1)
+    equal(ns.App.tab, "logs")
+    assert(ns.App.savedLogsPanel.frame:IsShown())
+    equal(ns.App.savedLogsPanel.selectedID, result.id)
+    equal(ns.App.savedLogsPanel.edit:GetText(), result.text)
+    local report = result.text
     assert(report:find("Export Sword", 1, true))
     assert(report:find("Linnen doek", 1, true))
     assert(report:find("Export Raid Item", 1, true))
@@ -1158,33 +1156,53 @@ test("save-all button writes and verifies the complete character report rather t
     assert(report:find("MAX", 1, true))
     assert(report:find("Testspeler", 1, true))
     equal(open.state, "open", "building a report must not archive an ongoing bid")
+    equal(ClassicLootLogDB.pendingFileExports, nil)
     local second = ns.App:SaveAllLogs()
-    assert(second and second.verified)
-    assert(second.filename ~= result.filename, "same-second exports must not overwrite one another")
-    assert(written[1] ~= written[2])
-    WriteCustomFile, ReadCustomFile = nil, nil
+    assert(second and second.id ~= result.id)
+    assert(second.title ~= result.title, "same-second saved logs must remain distinguishable")
 end)
 
-test("missing or failed file APIs queue a reloadable report and never claim a verified write", function()
+test("saved snapshots survive session reset and can be selected again inside the addon", function()
     resetSession()
-    slots = { item("Creature-export-queued", 2) }
+    slots = { item("Creature-export-preserved", 2) }
+    slots[1].name = "Preserved Cloth"
     dispatch("LOOT_OPENED")
+    local function forbidden() error("saving a report must not call a file API") end
+    WriteCustomFile, ReadCustomFile, ExportFile, ImportFile = forbidden, forbidden, forbidden, forbidden
+    local archived = ns.App:SaveAllLogs()
+    local text = archived.text
+    resetSession()
+    equal(#ClassicLootLogDB.entries, 0)
+    equal(ns.SavedLogs.Get(ClassicLootLogDB, archived.id).text, text)
+    local empty = ns.App:SaveAllLogs()
+    equal(archived.text, text)
+    assert(archived.text:find("Preserved Cloth", 1, true))
+    assert(not empty.text:find("Preserved Cloth", 1, true))
+    ns.App.frame:Hide()
+    SlashCmdList.CLASSICLOOTLOG("logs")
+    equal(ns.App.tab, "logs")
+    equal(ns.App.frame:IsShown(), true)
+    local found = false
+    for _, row in ipairs(ns.App.savedLogsPanel.rows) do
+        if rawget(row, "entry") and row.entry.id == archived.id then
+            row.scripts.OnClick(row, "LeftButton")
+            found = true
+        end
+    end
+    assert(found, "saved history remains selectable after reset")
+    equal(ns.App.savedLogsPanel.selectedID, archived.id)
+    equal(ns.App.savedLogsPanel.edit:GetText(), text)
+    ns.App.savedLogsPanel.reportScroll:SetVerticalScroll(53)
+    ns.App:Refresh()
+    equal(ns.App.savedLogsPanel.reportScroll:GetVerticalScroll(), 53)
+    ns.App.savedLogsPanel.edit:SetText("An accidental edit")
+    ns.App.savedLogsPanel.edit.scripts.OnTextChanged(ns.App.savedLogsPanel.edit)
+    equal(ns.App.savedLogsPanel.edit:GetText(), text)
+    equal(ns.SavedLogs.Get(ClassicLootLogDB, archived.id).text, text)
+    ns.App:Resize(680, 430)
+    equal(ns.App.savedLogsPanel.edit:GetText(), text)
+    ns.App:Resize(900, 590)
     WriteCustomFile, ReadCustomFile, ExportFile, ImportFile = nil, nil, nil, nil
-    local before = #(ClassicLootLogDB.pendingFileExports or {})
-    local queued = ns.App:SaveAllLogs()
-    assert(queued and queued.queued and queued.needsReload)
-    equal(queued.verified, false)
-    equal(queued.provider, "SavedVariables")
-    equal(#ClassicLootLogDB.pendingFileExports, before + 1)
-    assert(ClassicLootLogDB.pendingFileExports[#ClassicLootLogDB.pendingFileExports]:find("CLLEXPORT1:", 1, true))
-    WriteCustomFile = function() return false end
-    ReadCustomFile = function() return nil end
-    local failed = ns.App:SaveAllLogs()
-    assert(failed and failed.queued)
-    equal(failed.verified, false)
-    assert(failed.writeError, "native failure remains visible alongside the queued fallback")
-    equal(#ClassicLootLogDB.pendingFileExports, before + 2)
-    WriteCustomFile, ReadCustomFile = nil, nil
 end)
 
 

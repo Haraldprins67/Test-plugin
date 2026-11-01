@@ -1,8 +1,9 @@
--- Complete-log export behavior, written to execute unchanged on Lua 5.0.
+-- Complete-report formatting, written to execute unchanged on Lua 5.0.
 ClassicLootLogNS = {}
 dofile("ClassicLootLog/Core.lua")
 dofile("ClassicLootLog/Value.lua")
 dofile("ClassicLootLog/GroupLoot.lua")
+dofile("ClassicLootLog/Finance.lua")
 dofile("ClassicLootLog/FileExport.lua")
 local ns = ClassicLootLogNS
 local FileExport, Core = ns.FileExport, ns.Core
@@ -50,7 +51,7 @@ end
 test("complete report includes hidden history statistics group details and mob kills", function()
     local db, model, entry = fixture()
     local report = FileExport.BuildReport(db, model, options())
-    assert(string.find(report, "^Classic Loot Log export"))
+    assert(string.find(report, "^Classic Loot Log export\t1%.7%.0"))
     assert(string.find(report, "End Classic Loot Log export\n$"))
     assert(string.find(report, "Linen 1", 1, true))
     assert(string.find(report, "Linen 20", 1, true))
@@ -84,112 +85,66 @@ test("base64 encoding uses the standard ASCII alphabet and correct padding", fun
     equal(FileExport.Base64Encode(nil), nil)
 end)
 
-test("missing native API queues a complete ASCII marker without claiming a disk write", function()
+test("complete report contains the confirmed vendor ledger and produced materials", function()
     local db, model = fixture()
-    local result = FileExport.Save(db, model, options())
-    equal(result.status, "queued")
-    equal(result.provider, "SavedVariables")
-    equal(result.verified, false)
-    equal(result.rootWritten, false)
-    equal(result.needsReload, true)
-    equal(result.writeError, "file_api_missing")
-    equal(db.pendingFileExports[1], result.payload)
-    equal(result.payload, "CLLEXPORT1:" .. FileExport.Base64Encode(result.filename .. "\n" .. result.text))
-    assert(not string.find(result.payload, "[^A-Za-z0-9+/=:]"))
+    ns.Finance.Initialize(db)
+    db.finance.salesCopper = 12345
+    db.finance.buybackCopper = 321
+    db.finance.sales = {{timestamp = 1700000000, link = "item:2590", name = "Sold Linen", quantity = 2, copper = 12345}}
+    Core.AddSnapshot(db, {{kind = "item", name = "Lesser Magic Essence", link = "item:10938",
+        quantity = 3, origin = "disenchant", sourceGUID = "disenchant:1"}}, 1700000000, 60)
+    local report = FileExport.BuildReport(db, model, options())
+    assert(string.find(report, "Confirmed gross vendor sales\t12345\t1g 23s 45c", 1, true))
+    assert(string.find(report, "Produced disenchant material units\t3", 1, true))
+    assert(string.find(report, "Lesser Magic Essence", 1, true))
+    assert(string.find(report, "Sold Linen", 1, true))
 end)
 
-test("same-second exports get distinct names and reset keeps queued reports", function()
+test("building a report needs no file APIs and leaves queued exports untouched", function()
     local db, model = fixture()
-    local first = FileExport.Queue(db, model, options())
-    local second = FileExport.Queue(db, model, options())
-    equal(first.filename, "2026-11-01_04-05-06_Testplayer.txt")
-    equal(second.filename, "2026-11-01_04-05-06_Testplayer-02.txt")
-    Core.Reset(db, 60)
-    local third = FileExport.Queue(db, model, options())
-    equal(third.filename, "2026-11-01_04-05-06_Testplayer-03.txt")
-    equal(table.getn(db.pendingFileExports), 3)
-    assert(string.find(db.pendingFileExports[1], "^CLLEXPORT1:"))
+    local pending = {"existing legacy queued log"}
+    db.pendingFileExports = pending
+    local function forbidden() error("report generation must not call filesystem APIs") end
+    WriteCustomFile, ReadCustomFile, ExportFile, ImportFile = forbidden, forbidden, forbidden, forbidden
+    local report = FileExport.BuildReport(db, model, options())
+    assert(string.find(report, "Linen 20", 1, true))
+    equal(db.pendingFileExports, pending)
+    equal(table.getn(db.pendingFileExports), 1)
+    equal(FileExport.Save, nil)
+    equal(FileExport.Queue, nil)
 end)
 
-test("Octo custom-file writes stay sandboxed and verify the complete readback", function()
+test("logger and mob fields cannot inject report rows or retain WoW formatting", function()
     local db, model = fixture()
-    local files, calls = {}, 0
-    WriteCustomFile = function(name, text)
-        assert(not string.find(name, "[\\/%.]"), "native writer receives only a safe extensionless basename")
-        calls = calls + 1
-        files[name] = text
-    end
-    ReadCustomFile = function(name) return files[name] end
-    local result = FileExport.Save(db, model, options())
-    equal(result.status, "written")
-    equal(result.verified, true)
-    equal(result.provider, "WriteCustomFile")
-    equal(result.path, "CustomData\\" .. result.bridgeFile)
-    equal(result.target, "Lootlogs\\" .. result.filename)
-    equal(result.requiresBridge, true)
-    equal(result.rootWritten, false)
-    equal(result.needsReload, false)
-    equal(calls, 1)
-    equal(files[result.bridgeFile], result.text)
-    equal(db.pendingFileExports, nil)
+    db.mobs.kills[1].name = "|cffa335ee|Hitem:1|h[Purple wolf]|h|r\tTab\nRow\rReturn\\Path"
+    local report = FileExport.BuildReport(db, model, options("Name\tHeader\nFake"))
+    assert(string.find(report, "Logged by\tName\\tHeader\\nFake\n", 1, true))
+    assert(string.find(report, "[Purple wolf]\\tTab\\nRow\\rReturn\\\\Path", 1, true))
+    assert(not string.find(report, "|cffa335ee", 1, true))
+    assert(not string.find(report, "\nFake\n", 1, true))
 end)
 
-test("existing native bridge files are not overwritten after a counter reset", function()
-    local db, model = fixture()
-    local occupied = "ClassicLootLog_2026-11-01_04-05-06_Testplayer"
-    local files = {[occupied] = "existing export"}
-    WriteCustomFile = function(name, text) files[name] = text end
-    ReadCustomFile = function(name) return files[name] end
-    local result = FileExport.Save(db, model, options())
-    equal(result.filename, "2026-11-01_04-05-06_Testplayer-02.txt")
-    equal(files[occupied], "existing export")
-    equal(result.verified, true)
+test("missing group history and a failing date formatter leave a readable report", function()
+    local db = fixture()
+    local opts = options()
+    opts.dateFormatter = function() error("date unavailable") end
+    local report = FileExport.BuildReport(db, nil, opts)
+    assert(string.find(report, "Exported\tUnknown", 1, true))
+    assert(string.find(report, "Party / raid exporter unavailable.", 1, true))
+    assert(string.find(report, "End Classic Loot Log export\n", 1, true))
+    equal(FileExport.FileName(opts), "Unknown_Unknown_Testplayer.txt")
 end)
 
-test("SuperWoW uses the verified import export pair without escaping its directory", function()
-    local db, model = fixture()
-    local files = {}
-    ExportFile = function(name, text) files[name] = text end
-    ImportFile = function(name) return files[name] end
-    local result = FileExport.Save(db, model, options())
-    equal(result.status, "written")
-    equal(result.provider, "ExportFile")
-    equal(result.path, "imports\\" .. result.bridgeFile .. ".txt")
-    equal(result.pathVerified, false, "closed-source suffix behavior is not presented as independently verified")
-    equal(result.requiresBridge, true)
-    equal(files[result.bridgeFile], result.text)
+test("filename truncation preserves a complete multibyte player character", function()
+    local name = string.rep("a", 63) .. "Ärthäs"
+    local result = FileExport.FileName(options(name))
+    equal(result, "2026-11-01_04-05-06_" .. string.rep("a", 63) .. ".txt")
 end)
 
-test("false thrown or unverified writes queue instead of reporting success", function()
-    local db, model = fixture()
-    WriteCustomFile = function() return false end
-    local result = FileExport.Save(db, model, options())
-    equal(result.status, "queued"); equal(result.writeError, "write_rejected")
-    WriteCustomFile = function() error("permission denied") end
-    result = FileExport.Save(db, model, options())
-    equal(result.status, "queued"); equal(result.writeError, "write_failed")
-    WriteCustomFile = function() end
-    result = FileExport.Save(db, model, options())
-    equal(result.status, "queued"); equal(result.writeError, "write_unverified")
-    local written
-    WriteCustomFile = function(name) written = name end
-    ReadCustomFile = function(name) if name == written then return "partial report" end end
-    result = FileExport.Save(db, model, options())
-    equal(result.status, "queued"); equal(result.writeError, "readback_mismatch")
-    ReadCustomFile = function() error("cannot read") end
-    result = FileExport.Save(db, model, options())
-    equal(result.status, "queued"); equal(result.writeError, "readback_failed")
-    equal(result.verified, false)
-    equal(table.getn(db.pendingFileExports), 5)
+test("invalid database input returns an explicit formatter error", function()
+    local result, reason = FileExport.BuildReport(nil, nil, options())
+    equal(result, nil)
+    equal(reason, "invalid_database")
 end)
 
-test("invalid database input does not invoke native writers", function()
-    local calls = 0
-    WriteCustomFile = function() calls = calls + 1 end
-    local result, reason = FileExport.Save(nil, nil, options())
-    equal(result, nil); equal(reason, "invalid_database")
-    equal(FileExport.BuildReport(nil, nil, options()), nil)
-    equal(calls, 0)
-end)
-
-print(string.format("%d file-export tests passed", passed))
+print(string.format("%d report-format tests passed", passed))

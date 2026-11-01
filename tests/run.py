@@ -19,10 +19,6 @@ def main() -> None:
     root = Path(__file__).resolve().parents[1]
     os.chdir(root)
     subprocess.run([sys.executable, "tests/distribution_spec.py"], check=True)
-    subprocess.run(
-        [sys.executable, "-m", "unittest", "discover", "-s", "tests", "-p", "test_export_bridge.py"],
-        check=True,
-    )
     for suite in ("tests/core_spec.lua", "tests/stats_spec.lua", "tests/tracking_spec.lua",
                   "tests/wow_stub_spec.lua"):
         print(f"Running {suite} with Lua 5.1", flush=True)
@@ -41,6 +37,9 @@ def main() -> None:
         "tests/group_events_spec.lua",
         "tests/mini_spec.lua",
         "tests/file_export_spec.lua",
+        "tests/saved_logs_spec.lua",
+        "tests/minimap_spec.lua",
+        "tests/logs_panel_spec.lua",
     )
     for suite in legacy_suites:
         print(f"Running {suite} with Lua 5.1", flush=True)

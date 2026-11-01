@@ -1,8 +1,8 @@
 ## Interface: 11200
 ## Title: Classic Loot Log
-## Notes: Loot tracking, finances, confirmed vendor sales, disenchant materials and compact /sl metrics for OctoWoW.
+## Notes: Loot tracking, finances, saved logs, a movable minimap button and compact /sl metrics for OctoWoW.
 ## Author: Haraldprins67
-## Version: 1.6.0
+## Version: 1.7.0
 ## OptionalDeps: SellValue
 ## SavedVariablesPerCharacter: ClassicLootLogDB
 
@@ -16,4 +16,7 @@ ClassicLootLog\Finance.lua
 ClassicLootLog\Merchant.lua
 ClassicLootLog\Mini.lua
 ClassicLootLog\FileExport.lua
+ClassicLootLog\SavedLogs.lua
+ClassicLootLog\MinimapButton.lua
+ClassicLootLog\LogsPanel.lua
 ClassicLootLog\Main.lua

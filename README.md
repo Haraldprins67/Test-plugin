@@ -1,8 +1,8 @@
 # Classic Loot Log — OctoWoW
 
-**Version 1.6.0** targets **OctoWoW's WoW 1.12.1 / Lua 5.0 client** (`Interface: 11200`). It provides an English interface using the original WoW dialog background, decorative border, gold headings and standard buttons.
+**Version 1.7.0** targets **OctoWoW's WoW 1.12.1 / Lua 5.0 client** (`Interface: 11200`). It provides an English interface using the original WoW dialog background, decorative border, gold headings and standard buttons.
 
-**[Download ClassicLootLog-1.6.0-OctoWoW.zip](downloads/ClassicLootLog-1.6.0-OctoWoW.zip?raw=true)**
+**[Download ClassicLootLog-1.7.0-OctoWoW.zip](downloads/ClassicLootLog-1.7.0-OctoWoW.zip?raw=true)**
 
 ## Install or update
 
@@ -50,7 +50,7 @@ Open **Finances** or type **`/cll finance`**. This tab separates the three figur
 2. **Actual vendor sales (gross):** income from confirmed sales while this addon is running. **Net vendor income** additionally subtracts confirmed buybacks, which are shown separately. These are recorded transactions, not a conversion of the estimated loot value or a change in your overall character balance.
 3. **Disenchant materials produced:** a list of the actual observed essences, shards, dust and other materials with their quantities. These are produced-history counts, not current inventory; selling the resulting material does not erase the fact it was produced.
 
-The tab scrolls when the window is small or there are many material types. Its values use explicit gold/silver/copper denominations, including zeros. **Export log** from this tab exports the financial ledger; **Save all** includes the same summary and transaction details in the complete report.
+The tab scrolls when the window is small or there are many material types. Its values use explicit gold/silver/copper denominations, including zeros. **`/cll log`** from this tab opens a copyable financial ledger; **Save log** includes the same summary and transaction details in the complete archived report.
 
 ### How confirmed vendor income is recorded
 
@@ -66,45 +66,31 @@ Type **`/sl`** to show or hide a small movable window containing only **Mobs/hou
 
 Use `/sl show` or `/sl hide` for explicit control. Drag the panel to move it. Visibility is remembered per character. Timer controls remain `/cll timer on` and `/cll timer off`; resetting the session also resets the mini window's displayed values.
 
-## Save all logs to `Octowow/Lootlogs`
+## Minimap button
 
-Open **Export log** and click **Save all**, or use **`/cll save`**. This prepares one complete report containing all retained personal loot, item/vendor statistics, party/raid choices, rolls, bids, receipts, unresolved awards and observed mob kills. It includes rows outside the visible tab. The report and filename identify the logging character and the client-local export date/time:
+Click the small **Classic Loot Log** icon beside the minimap with the **left mouse button** to open or close the main window. To reposition it, hold **Ctrl + Shift**, press and hold the **left mouse button** on the icon, and drag it around the minimap. Release the mouse button to finish. The position is remembered per character and is preserved by a session reset.
+
+## Saved Logs
+
+Open the **Saved Logs** tab or type **`/cll logs`** to review archived reports inside the addon. Click **Save log**, including in the copy/export dialog, or use **`/cll save`** to save a complete snapshot containing all retained personal loot, item/vendor statistics, party/raid choices, rolls, bids, receipts, unresolved awards, finances, disenchant materials and observed mob kills. A snapshot includes records outside the visible tab and does not change when the live session changes.
+
+Each report is titled with the client-local date, time and logging character, for example:
 
 ```text
-Octowow/Lootlogs/2026-11-01_03-22-15_YourCharacter.txt
+2026-11-01_03-22-15_YourCharacter
 ```
 
-Names are Windows-safe. Repeated exports in the same second receive a sequence suffix; existing different logs are not overwritten.
+Select a saved report to read it again. Repeated saves do not overwrite an earlier report. Resetting a session preserves this archive. Pending reports from the earlier file exporter are automatically recovered into Saved Logs when they can be decoded.
 
-### Local helper setup (Windows)
+**No external program or Python installation is needed.** Logs are stored in the addon's per-character SavedVariables database, rather than individual `.txt` files or an addon subfolder. WoW writes this database to disk on logout or **`/reload`**. Finish active group rolls before reloading, because open tracking contexts are archived on reload. A crash can lose changes since the last save. The earlier standalone text-file exporter is no longer included or required.
 
-The known Octo/SuperWoW file APIs are restricted to `CustomData` or `imports`. They do **not** grant the addon direct access to an arbitrary root `Lootlogs` folder. The supplied local helper copies the completed reports to the exact folder you requested.
-
-1. Have **Python 3.9 or newer** installed on your computer. Python is required only by the external helper, not by the addon itself.
-2. Double-click `START-LOOTLOG-EXPORTER.cmd` and leave its window open. Its location is:
-   - Manual ZIP: `Octowow/Interface/AddOns/ClassicLootLog/tools/START-LOOTLOG-EXPORTER.cmd`.
-   - Octo Launcher Git install: `Octowow/Interface/AddOns/Test-plugin/tools/START-LOOTLOG-EXPORTER.cmd`.
-3. The helper finds the game directory and creates or reuses **`Octowow/Lootlogs`**.
-4. Click **Save all** in-game. If a supported patch can write and read back its file, the helper picks it up immediately from the patch's allowed folder.
-5. If the addon says **queued**, use **`/reload`** or log out. Finish any active group rolls before reloading, because open tracking contexts are archived on reload. WoW then writes the pending report to SavedVariables, and the helper creates the requested text file. No specific patch is needed for this fallback.
-
-The helper reports the final `Saved:` path in its window. The in-game message distinguishes a verified patch export from a queued export; neither claims that a root file exists before the external helper copies it. A copyable complete report remains available in the export dialog.
-
-The helper does not run Lua, modify your SavedVariables, remove source files, send data over the network or install a startup service. It only reads this addon's completed export records and writes text files in `Lootlogs`. Existing user logs are preserved; processing the same export again does not create repeated copies. Queued records remain in SavedVariables so they can be recovered, including after a session reset; avoid repeatedly clicking Save all when one snapshot is sufficient.
-
-You can also run the helper directly:
-
-```sh
-python tools/lootlog_exporter.py --watch --game-dir "C:/Games/Octowow"
-```
-
-Use `--once` instead of `--watch` for a single scan. Stop watch mode with Ctrl+C or by closing its window. Python helpers and the Windows launcher are included under `ClassicLootLog/tools` in the manual package and under `tools` in the Git repository.
+For an optional text copy, **`/cll log`** opens a selectable report: use **Ctrl+A**, then **Ctrl+C**. Saving and reviewing logs within CLL does not need that step.
 
 ## Tabs and party / raid loot
 
-The main window has **Loot**, **Commands**, **Party / Raid** and **Finances** tabs. **Commands** is a scrollable reference to every primary command and its arguments. The decorative title is now centered inside its header and retains that anchor while resizing.
+The main window has **Loot**, **Commands**, **Party / Raid**, **Finances** and **Saved Logs** tabs. **Commands** is a scrollable reference to every primary command and its arguments. The decorative title is now centered inside its header and retains that anchor while resizing.
 
-**Party / Raid** keeps an observed item history with the distribution method, recipient, winning EP/GP bid where available, and the two highest eligible rollers. Click an item to inspect every recorded Need/Greed/Pass choice, roll, bid and receipt. The detail area scrolls independently. **Export log → Party / Raid** exports the complete history, including unresolved receipts.
+**Party / Raid** keeps an observed item history with the distribution method, recipient, winning EP/GP bid where available, and the two highest eligible rollers. Click an item to inspect every recorded Need/Greed/Pass choice, roll, bid and receipt. The detail area scrolls independently. **`/cll log` → Party / Raid** opens the complete copyable history, including unresolved receipts.
 
 ### Group loot
 
@@ -137,7 +123,9 @@ Open contexts restored after `/reload` are archived as unresolved, so new bids c
 | Control | Action |
 | --- | --- |
 | **Reset** | Asks for confirmation, then clears loot, mob counts, disenchant marks and elapsed time. A running stopwatch restarts at zero. |
-| **Export log** | Shows copyable TSV text. Choose **Loot entries** or **Statistics**, copy with Ctrl+A and Ctrl+C, and save outside WoW as `.txt` or `.tsv`. |
+| **Save log** | Archives a complete report inside CLL and opens Saved Logs. Use `/cll log` for an optional copyable TSV view. |
+| **Saved Logs** | Save and reopen complete snapshots without an external program. |
+| **Minimap icon** | Left-click to toggle CLL; hold Ctrl+Shift and drag with the left mouse button to reposition it. |
 | **Timer: ON / OFF** | Starts, pauses or resumes the stopwatch. Paused and offline time are excluded. |
 | **Lower-right corner grip** | Drag to resize the main window. Column widths and the number of visible rows adapt to the available space. |
 | **Auto text: ON / OFF** | Scale the interface text with the window width, or keep the normal font size while the layout reflows. |
@@ -152,7 +140,8 @@ The list records loot while the window is hidden and while the timer is paused. 
 | --- | --- |
 | `/cll` or `/lootlog` | Toggle the main window |
 | `/sl` / `/sl show` / `/sl hide` | Toggle, show or hide the three-metric mini window |
-| `/cll save` | Prepare all logs for file export, independent of the selected tab |
+| `/cll save` | Archive a complete snapshot inside CLL, independent of the selected tab |
+| `/cll logs` | Open the Saved Logs archive |
 | `/cll show` / `/cll hide` | Show / hide the window |
 | `/cll stats` | Show item shares |
 | `/cll finance` or `/cll finances` | Show original-drop values, actual sales and disenchant materials |
@@ -236,7 +225,7 @@ Disenchanting by another player is not automatically linked to your recorded ori
 
 ## Log files and saved data
 
-Standard WoW addon APIs cannot write an arbitrary text file. Use **Export log** to copy text into an external editor, or **Save all** with the local helper described above to write dated files into `Lootlogs`. Loot entries include date/time, session time, type, item, quantity, quality, source, item-link data, origin (`drop` or `disenchant`) and disenchant count. Export order is oldest first; embedded tabs and line breaks are escaped.
+Use **Saved Logs** to save and review complete reports inside CLL. This archive uses SavedVariables and does not create separate text files. **`/cll log`** also provides an optional copyable text view. Loot entries include date/time, session time, type, item, quantity, quality, source, item-link data, origin (`drop` or `disenchant`) and disenchant count. Export order is oldest first; embedded tabs and line breaks are escaped.
 
 On logout or `/reload`, WoW writes the per-character database to:
 
@@ -244,13 +233,13 @@ On logout or `/reload`, WoW writes the per-character database to:
 WTF/Account/<account>/<realm>/<character>/SavedVariables/ClassicLootLog.lua
 ```
 
-Loot, mob counts, timer state and DE marks survive between sessions. Edit saved files only while WoW is closed. A crash can lose changes made since the last save. Existing version 1.x records are preserved during migration.
+Loot, mob counts, timer state, DE marks, minimap position and saved reports survive between sessions. Edit saved files only while WoW is closed. A crash can lose changes made since the last save. Existing version 1.x records are preserved during migration.
 
-There is no fixed history limit. Export and reset periodically during long sessions to keep memory and file size manageable. Money uses the text reported by the loot window; its quantity column is not guaranteed to represent copper.
+There is no fixed history limit. Resetting the live session preserves saved reports, so the archive also contributes to memory and saved-data size. Money uses the text reported by the loot window; its quantity column is not guaranteed to represent copper.
 
 ## Development and validation
 
-WoW loads `Compat.lua`, `Core.lua`, `Tracking.lua`, `Value.lua`, `GroupLoot.lua`, `GroupEvents.lua`, `Finance.lua`, `Merchant.lua`, `Mini.lua`, `FileExport.lua` and `Main.lua` in that order. The manual and launcher TOCs reference the same files. No build or runtime dependencies are needed by the addon. Use the existing checkout in cloud tasks; they are already isolated and do not need extra Git worktrees.
+WoW loads `Compat.lua`, `Core.lua`, `Tracking.lua`, `Value.lua`, `GroupLoot.lua`, `GroupEvents.lua`, `Finance.lua`, `Merchant.lua`, `Mini.lua`, `FileExport.lua`, `SavedLogs.lua`, `MinimapButton.lua`, `LogsPanel.lua` and `Main.lua` in that order. The manual and launcher TOCs reference the same files. No build or runtime dependencies are needed by the addon. Use the existing checkout in cloud tasks; they are already isolated and do not need extra Git worktrees.
 
 The Python test runner uses Lupa for Lua 5.1 regression tests:
 
@@ -267,7 +256,7 @@ For OctoWoW compatibility, additionally run with an actual **Lua 5.0** interpret
 .venv/bin/python tests/run.py --lua50 /path/to/lua5.0
 ```
 
-That command parses every addon file with Lua 5.0 and executes the compatible core, adapter, legacy tracking and strict Vanilla UI suites. The Vanilla mocks deliberately omit modern APIs and pass event arguments through `this`, `event` and `arg1` globals. They exercise both addon folder identities, resizing, text scaling, price lookup and epic notices. A distribution check validates both TOC entry points. Tests cover the reported startup error, fourth-return loot quality, English labels, classic frame style, timer fallback, item shares, kill tracking, DE and export. These checks do not replace validation inside the real OctoWoW client.
+That command parses every addon file with Lua 5.0 and executes the compatible core, adapter, legacy tracking and strict Vanilla UI suites. The Vanilla mocks deliberately omit modern APIs and pass event arguments through `this`, `event` and `arg1` globals. They exercise both addon folder identities, resizing, text scaling, price lookup, epic notices, minimap dragging and the saved-log archive. A distribution check validates both TOC entry points. Tests cover the reported startup error, fourth-return loot quality, English labels, classic frame style, timer fallback, item shares, kill tracking, DE and export. These checks do not replace validation inside the real OctoWoW client.
 
 A minimal package can be created with:
 
@@ -282,6 +271,6 @@ Also test resizing small/large, locking the grip, toggling Auto text, retaining 
 
 For party/raid validation, test a native Need/Greed roll including a tied score, master-loot /roll with an explicitly focused item, case/punctuation variants of MIN/NEED/MAX followed by an actual receipt, and two identical simultaneous item links that must remain ambiguous. Verify that no chat or loot actions are sent by the tracker.
 
-For file-export validation, run the helper from your installed addon tools folder, export once through a supported native writer and once through the SavedVariables fallback, and verify that filenames contain the click time and player name. Test a second same-second export without overwriting the first. Confirm `/sl` still updates with the main window hidden.
+For archive validation, save a report, change the live session, and reopen the saved snapshot. Save twice in the same second, reset the session and reload to verify that both reports remain distinct and readable. Check migration of older queued reports. Left-click the minimap icon, then Ctrl+Shift+left-drag it and verify its position after reload. Confirm `/sl` still updates with the main window hidden.
 
 For financial validation, sell a known stack, sell multiple stacks with auto-repair, buy an item back, receive unrelated money with a vendor open, and compare the confirmed gross/net values. Disenchant a logged original and check that its gross drop value remains while the produced essence/shard counts increase. Verify financial export and persistence across reload.
