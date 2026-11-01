@@ -1,5 +1,6 @@
 -- Behavioral smoke tests with a small WoW API substitute; no visual validation.
 local ns, frames, editBoxes, timers = {}, {}, {}, {}
+ClassicLootLogNS = ns
 local clock, stamp, slots = 100, 1700000000, {}
 local popup, chat = nil, {}
 local combatLog, bags = {}, {}
@@ -95,6 +96,7 @@ ITEM_QUALITY_COLORS = { [0] = { r = .6, g = .6, b = .6 }, [1] = { r = 1, g = 1, 
 LOOT_SLOT_ITEM, LOOT_SLOT_MONEY, LOOT_SLOT_CURRENCY = 1, 2, 3
 ACCEPT, CANCEL, YES, NO, CLOSE = "OK", "Annuleren", "Ja", "Nee", "Sluiten"
 function CreateFrame(kind, name, parent) return widget(kind, name, parent) end
+function GetBuildInfo() return "1.15.9", "70576", "", 11509 end
 function GetTime() return clock end
 function time() return stamp end
 function date(pattern, value) return os.date(pattern, value or stamp) end
@@ -173,6 +175,7 @@ local function item(guid, quantity)
         link = "|cffffffff|Hitem:2589::::::::|h[Linnen doek]|h|r", sources = {guid, quantity} }
 end
 
+assert(loadfile("ClassicLootLog/Compat.lua"))()
 assert(loadfile("ClassicLootLog/Core.lua"))("ClassicLootLog", ns)
 assert(loadfile("ClassicLootLog/Tracking.lua"))("ClassicLootLog", ns)
 assert(loadfile("ClassicLootLog/Main.lua"))("ClassicLootLog", ns)
@@ -238,7 +241,7 @@ test("log command exposes every record in copyable export text", function()
     local found
     for _, box in ipairs(editBoxes) do
         local text = box:GetText()
-        if text:find("Datum/tijd", 1, true) then found = text end
+        if text:find("Date/time", 1, true) then found = text end
     end
     assert(found, "export edit box must contain TSV")
     assert(found:find("Linnen doek", 1, true))
@@ -510,7 +513,7 @@ test("mobs per hour uses only kills made while the stopwatch runs", function()
     equal(stats.total, 3)
     equal(stats.timed, 2)
     equal(stats.perHour, 60)
-    assert(ns.App.mobText:GetText():find("Mobs/uur: 60.0", 1, true))
+    assert(ns.App.mobText:GetText():find("Mobs/hour: 60.0", 1, true))
 end)
 
 test("statistics view calculates item shares from quantities and combines matching item IDs", function()
@@ -587,7 +590,7 @@ test("successful disenchant marks the consumed original and separates materials 
     equal(#ClassicLootLogDB.entries, 2)
     equal(ClassicLootLogDB.entries[2].origin, "disenchant")
     equal(ClassicLootLogDB.entries[2].quantity, 2)
-    equal(ns.App.rows[1].processing:GetText(), "DE-materiaal")
+    equal(ns.App.rows[1].processing:GetText(), "DE material")
     equal(ns.App.rows[1].percent:GetText(), "-")
     ns.App.rows[1].scripts.OnClick(ns.App.rows[1])
     assert(not ns.App.markButton:IsEnabled(), "DE materials cannot be marked as original drops")
@@ -598,13 +601,13 @@ test("successful disenchant marks the consumed original and separates materials 
     equal(stats.rows[1].percent, 100)
     ns.App:SetView("stats")
     equal(ns.App.rows[1].quantity:GetText(), "1")
-    equal(ns.App.rows[2].processing:GetText(), "DE-materiaal")
+    equal(ns.App.rows[2].processing:GetText(), "DE material")
     ns.App:ShowExport("stats")
     assert(ns.App.exportFrame.edit:GetText():find("Testzwaard", 1, true))
     assert(ns.App.exportFrame.edit:GetText():find("Vreemd stof", 1, true))
     ns.App:ShowExport("loot")
     local exported = ns.App.exportFrame.edit:GetText()
-    assert(exported:find("Herkomst\tOnttoverd", 1, true))
+    assert(exported:find("Origin\tDisenchanted", 1, true))
     assert(exported:find("disenchant", 1, true))
 end)
 

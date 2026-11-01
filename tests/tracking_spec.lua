@@ -1,4 +1,7 @@
 local ns = {}
+ClassicLootLogNS = ns
+function GetBuildInfo() return "1.15.9", "70576", "", 11509 end
+assert(loadfile("ClassicLootLog/Compat.lua"))()
 assert(loadfile("ClassicLootLog/Tracking.lua"))("ClassicLootLog", ns)
 local Tracker = ns.Tracker
 local clock, stamp, combat, bags = 0, 1700000000, {}, {}

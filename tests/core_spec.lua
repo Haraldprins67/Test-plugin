@@ -1,5 +1,6 @@
 -- Run from the repository root: lua5.1 tests/core_spec.lua
 local ns = {}
+ClassicLootLogNS = ns
 assert(loadfile("ClassicLootLog/Core.lua"))("ClassicLootLog", ns)
 local Core = ns.Core
 local tests, passed = {}, 0

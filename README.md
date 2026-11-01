@@ -1,91 +1,109 @@
-# Classic Loot Log
+# Classic Loot Log — OctoWoW
 
-Een Nederlandstalige WoW-addon voor **Classic Era en Hardcore**, gericht op clientversie **1.15.9** (`Interface: 11509`). De addon bewaart de buit die zichtbaar wordt wanneer je een lootvenster opent, inclusief items, geld en valuta. Je hoeft de buit niet op te pakken. Automatisch looten wordt via dezelfde lootevents gevolgd.
+**Version 1.2.0** targets **OctoWoW's WoW 1.12.1 / Lua 5.0 client** (`Interface: 11200`). It provides an English interface using the original WoW dialog background, decorative border, gold headings and standard buttons.
 
-Versie **1.1.0** voegt een mobcounter, mobs per uur, itempercentages en registratie van onttoverde items en materialen toe. Je bestaande lootlijst uit versie 1.0 blijft bewaard.
+**[Download ClassicLootLog-1.2.0-OctoWoW.zip](downloads/ClassicLootLog-1.2.0-OctoWoW.zip?raw=true)**
 
-## Installeren
+## Install or update
 
-Download het kant-en-klare [ClassicLootLog-1.1.0.zip](downloads/ClassicLootLog-1.1.0.zip?raw=true). Dit zipbestand bevat alleen de addonmap en kan rechtstreeks in `Interface/AddOns` worden uitgepakt. Via de groene **Code**-knop en **Download ZIP** kun je ook de volledige repository downloaden; kopieer daaruit alleen de map `ClassicLootLog` naar `Interface/AddOns`.
+1. Exit WoW completely.
+2. Extract the download into your **OctoWoW game folder's `Interface/AddOns/`** directory.
+3. Check that the final path is `Interface/AddOns/ClassicLootLog/ClassicLootLog.toc`. Avoid an extra nested addon folder.
+4. When updating, replace the previous `ClassicLootLog` addon folder. Do not delete your `WTF` folder; that is where your saved data lives.
+5. Enable **Classic Loot Log** in the character-selection AddOns menu, enter the game and type `/cll`.
 
-1. Sluit WoW af.
-2. Kopieer de map `ClassicLootLog` naar de map `Interface/AddOns` van je Classic Era-installatie (meestal `_classic_era_/Interface/AddOns`). Bij gebruik van het zipbestand: pak het daar uit.
-3. Controleer dat `Interface/AddOns/ClassicLootLog/ClassicLootLog.toc` bestaat. Vermijd een dubbele map zoals `ClassicLootLog/ClassicLootLog/`.
-4. Start WoW, schakel **Classic Loot Log** in bij AddOns en typ `/cll` na het inloggen.
+If you download the entire repository through **Code → Download ZIP**, copy only its `ClassicLootLog` folder to `Interface/AddOns`.
 
-Bij een latere WoW-patch kan WoW de addon als verouderd markeren. Controleer de werking op die client voordat je de interfaceversie aanpast; de Lua-tests bewijzen geen compatibiliteit met toekomstige clients.
+This package targets OctoWoW, rather than the official modern Classic Era client. Optional newer API paths remain regression-tested, but the packaged interface version is deliberately `11200`.
 
-## Gebruiken
+## Compatibility fix
 
-De lijst toont de nieuwste loot bovenaan, met kloktijd, stopwatchstand, itemlink, aantal, het aandeel van dat item in alle oorspronkelijke loot en eventuele DE-markeringen. Gebruik het muiswiel of de schuifbalk voor oudere regels. Beweeg over een item voor de tooltip of gebruik Shift+klik om de link in een geopende chatregel te plaatsen.
+The earlier 1.1.0 package targeted Blizzard's modern Classic Era API and Lua 5.1. It could fail immediately on OctoWoW with:
 
-| Functie | Werking |
+```text
+Core.lua:1: unexpected symbol near '...'
+```
+
+Version 1.2.0 uses Lua 5.0 syntax throughout all four addon files, a shared namespace that does not rely on chunk arguments, old-style event globals, legacy loot APIs, and a frame-based timer fallback. OctoWoW's optional GUID return from `UnitExists(unit)` is used when available; no Nampower installation is required by this addon.
+
+## Controls
+
+| Control | Action |
 | --- | --- |
-| **Reset** | Vraagt bevestiging en wist daarna loot, mobcounter, DE-markeringen, ontdubbeling en sessietijd. Een ingeschakelde stopwatch begint opnieuw bij nul. |
-| **Log exporteren** | Opent het volledige log als tabgescheiden tekst. Kies onderaan **Lootregels** of **Statistieken**. Kopieer met Ctrl+A en Ctrl+C en sla het in een teksteditor op als `.txt` of `.tsv`. |
-| **Timer: AAN/UIT** | Start of pauzeert de stopwatch. Hervatten telt verder; pauzetijd en tijd buiten het spel tellen niet mee. |
-| **Itempercentages / Lootlijst** | Wisselt tussen de afzonderlijke lootregels en een overzicht per item-ID, gesorteerd op aantal. DE-materialen staan apart onderaan. |
-| **Onttoverd +1** | Selecteer een oorspronkelijke itemregel en markeer één exemplaar als onttoverd. De oorspronkelijke drop blijft bewaard. |
-| **Herstel DE -1** | Verwijdert één DE-markering van de geselecteerde regel, bijvoorbeeld om een verkeerde koppeling te corrigeren. |
+| **Reset** | Asks for confirmation, then clears loot, mob counts, disenchant marks and elapsed time. A running stopwatch restarts at zero. |
+| **Export log** | Shows copyable TSV text. Choose **Loot entries** or **Statistics**, copy with Ctrl+A and Ctrl+C, and save outside WoW as `.txt` or `.tsv`. |
+| **Timer: ON / OFF** | Starts, pauses or resumes the stopwatch. Paused and offline time are excluded. |
+| **Item shares / Loot list** | Switches between individual loot entries and totals grouped by item ID. Disenchant materials appear separately. |
+| **Disenchanted +1** | Select an original loot entry, then mark one unit as disenchanted. |
+| **Undo DE -1** | Removes one disenchant mark from the selected entry. |
 
-De lootregistratie blijft aan wanneer het venster gesloten is of de timer uit staat. Loot die tijdens een gepauzeerde timer binnenkomt, krijgt geen stopwatchstand. De timer start standaard uit en onthoudt daarna zijn aan/uit-stand.
+The list records loot while the window is hidden and while the timer is paused. Hover over an item to view its tooltip; Shift-click inserts its link into chat. Scroll to see older records.
 
-### Mobcounter en mobs per uur
-
-De mobcounter telt een NPC wanneer jij, je pet, een groepslid, een raidlid of hun pet schade heeft gedaan en die mob daarna volgens het gevechtslog sterft. Een gedeelde mob telt één keer, ook als meerdere groepsleden eraan bijdragen. Andere spelerskills, PvP-doelen en lijken die je alleen opent zonder geregistreerde gevechtsdeelname tellen niet mee. Het is geen telling van alle doden in de omgeving of van wie de laatste slag uitvoerde.
-
-De totale mobcounter blijft ook bij een gepauzeerde timer tellen. **Mobs/uur = mobs gedood met de timer aan × 3600 / actieve stopwatchseconden.** Kills tijdens een pauze tellen dus niet mee in dat uurgemiddelde. Zonder gemeten tijd toont de addon nul. Het getal is een sessiegemiddelde, geen voortschrijdend gemiddelde over het laatste uur. Aan het begin van een korte sessie kan het sterk schommelen.
-
-Alleen gebeurtenissen die jouw client ontvangt, zijn beschikbaar. Een groepsgenoot die buiten je gevechtslogbereik vecht, kan ontbreken. Na `/reload` begint het volgen van nog levende mobs opnieuw; bestaande getelde kills blijven bewaard. Gevechtsdeelname ouder dan 30 minuten vervalt.
-
-### Itempercentages
-
-**Itempercentage = het aantal exemplaren van dat item / alle oorspronkelijke itemexemplaren × 100.** Tien stuks linnen en vijf zwaarden betekent bijvoorbeeld 66,7% linnen en 33,3% zwaarden. Stacks tellen op hoeveelheid, niet op het aantal lootregels. Verschillende links met hetzelfde item-ID worden samengevoegd.
-
-Geld, valuta en door onttoveren gemaakte materialen blijven buiten deze noemer. Een later onttoverd zwaard blijft een oorspronkelijke zwaarddrop. De berekening toont daarmee de samenstelling van je waargenomen loot; het is geen dropkans per mob, inventaristelling of goudwaarde. In het statistiekoverzicht staan materialen apart met een streepje in de droppercentagekolom. De statistiekexport geeft daarnaast hun aandeel binnen uitsluitend de DE-materialen.
-
-### Onttoveren (disenchant / DE)
-
-De addon volgt geslaagde **Onttoveren**-casts van je eigen personage. De materialen in het bijbehorende lootvenster krijgen het label **DE-materiaal** en tellen niet opnieuw mee als oorspronkelijke drops. Een geannuleerde of mislukte cast markeert niets.
-
-Een tassenvergelijking vóór en na de cast probeert het verbruikte item te herkennen. Wanneer precies één exemplaar is verdwenen, markeert de addon de nieuwste nog ongemarkeerde lootregel met hetzelfde item-ID. De originele regel en hoeveelheid blijven staan; **DE: 1** betekent dat één exemplaar is onttoverd. Materialen kunnen ook geregistreerd worden als het oorspronkelijke item niet in je lootlijst staat.
-
-Bij meerdere verdwenen items, ontbrekende tasgegevens of een gemiste caststart wordt het oorspronkelijke item niet geraden. Selecteer dan de betreffende lootregel en gebruik **Onttoverd +1**. Gebruik **Herstel DE -1** voor correcties. Als je meerdere identieke exemplaren had, kan WoW niet altijd aangeven uit welke eerdere drop het verbruikte exemplaar kwam; controleer de gekozen regel. De addon voert geen onttoveracties uit.
-
-Onttoveren door een ander groepslid wordt niet automatisch aan jouw eerdere loot gekoppeld. Je kunt het oorspronkelijke item handmatig markeren; materiaalherkenning vereist je eigen geslaagde onttovercast en het bijbehorende lootvenster. Achteraf opgepakte of verhandelde materialen worden niet op basis van alleen hun itemnaam als DE-resultaat aangemerkt.
-
-| Commando | Actie |
+| Command | Action |
 | --- | --- |
-| `/cll` of `/lootlog` | Venster openen/sluiten |
-| `/cll show` / `/cll hide` | Venster openen / sluiten |
-| `/cll reset` | Resetbevestiging openen |
-| `/cll log` | Logexport openen |
-| `/cll stats` of `/cll statistieken` | Overzicht met itempercentages openen |
-| `/cll timer` | Stopwatch aan/uit |
-| `/cll timer aan` / `/cll timer uit` | Stopwatch starten/hervatten of pauzeren |
+| `/cll` or `/lootlog` | Toggle the window |
+| `/cll show` / `/cll hide` | Show / hide the window |
+| `/cll stats` | Show item shares |
+| `/cll reset` | Open reset confirmation |
+| `/cll log` | Open the export window |
+| `/cll timer` | Toggle the stopwatch |
+| `/cll timer on` / `/cll timer off` | Start/resume or pause the stopwatch |
 
-## Logbestand en opslag
+## What is recorded?
 
-WoW verbiedt addons om zelf willekeurige bestanden te schrijven. Daarom biedt deze addon twee manieren om je log te bewaren:
+Loot is recorded when your own loot window opens, whether or not you take the item. Items, money and currencies exposed by the client are kept in the log. Unopened corpses and loot visible only to other players are not available to the addon. This is not an inventory tracker or a record of which party member received each item.
 
-- **Tekstbestand:** gebruik **Log exporteren**, kopieer de tekst en sla deze buiten WoW op. De export bevat alle regels, ook de regels buiten het zichtbare venster, met datum/tijd, sessietijd, type, naam, aantal, kwaliteit, bron-GUID, item-ID/linkgegevens, herkomst (`drop` / `disenchant`) en het aantal onttoverde exemplaren. Exportvolgorde is van oud naar nieuw. Tabs en regeleinden in namen worden als `\t` en `\n` geschreven. De knop **Statistieken** in het exportvenster toont de mobcounter, het uurgemiddelde, itempercentages, onttoverde aantallen en een afzonderlijke materialentabel.
-- **Automatisch WoW-bestand:** bij uitloggen of `/reload` schrijft WoW de lijst, mobcounter, timer en DE-markeringen per personage naar `WTF/Account/<account>/<realm>/<personage>/SavedVariables/ClassicLootLog.lua` binnen je Classic Era-installatie. Dit bestand bevat de Lua-database en blijft behouden tussen sessies. Bewerk het alleen als WoW afgesloten is. Een crash kan gegevens sinds het laatste opslagmoment verliezen.
+When loot-source GUIDs or OctoWoW's targeted-corpse GUID are available, reopening or partially looting the same corpse is deduplicated. Without a stable source ID, deduplication is limited to the current loot window; reopening may add another entry. Resetting intentionally clears this history.
 
-Er is geen ingebouwde limiet op het aantal bewaarde lootregels. Exporteer en reset af en toe bij lange sessies om geheugen en de bestandsgrootte te beperken. Geld wordt weergegeven met de hoeveelheidstekst uit het lootvenster; de aantalkolom is de door de loot-API gerapporteerde hoeveelheid, geen omzetting naar koperstukken.
+Incomplete item data is retried up to five times while the loot window remains open. Auto-loot can remove an item before its data arrives, and incomplete snapshots of identical stacks can undercount. Removed data cannot be reconstructed afterwards.
 
-## Wat wordt geregistreerd?
+## Mob counter and mobs per hour
 
-De addon ziet alleen buit die de WoW-client via jouw lootvenster beschikbaar maakt. Buit op ongeopende lijken, verborgen persoonlijke buit van andere spelers en groepsloot die alleen bij iemand anders zichtbaar is, kunnen niet volledig worden geregistreerd. Dit is geen groepsbrede loottracker en registreert niet wie iets ontvangt.
+The counter includes your kills, pet kills and group/raid kills that your client observes. It does not count every nearby death.
 
-Hetzelfde item op hetzelfde lijk wordt aan zijn bron-GUID herkend en telt bij heropenen of gedeeltelijk looten niet opnieuw mee. Meerdere gelijke stacks van dezelfde bron worden samengevoegd. Als WoW geen bron-GUID levert, wordt alleen binnen het huidige lootvenster ontdubbeld; heropenen kan dan een extra regel geven. Na **Reset** telt opnieuw geopende buit weer als nieuwe registratie. De lijst is per personage, niet accountbreed.
+On OctoWoW, legacy combat messages are matched against the client's damage/death templates and your party/raid names. Observed participation is followed by a death message, or a personal/group kill message directly identifies the kill. Optional target GUIDs improve identification and deduplication. Pets and group targets are included when their names or GUIDs are available.
 
-Bij ontbrekende itemgegevens probeert de addon maximaal vijf keer opnieuw, zolang het lootvenster open blijft. Als automatisch looten een item al verwijdert voordat de client de gegevens beschikbaar maakt, kan het ontbreken in het log. Ook kunnen identieke stacks in onvolledige snapshots worden ondergeteld. De addon kan verdwenen lootgegevens niet achteraf reconstrueren.
+Old combat messages do not provide the same structured identifiers as modern WoW. Without a GUID, simultaneous mobs with the same name can be ambiguous, some group kills can be missed, and a PvP target absent from the available unit tokens cannot always be distinguished by name alone. Combat-log range also limits what can be observed. The counter should therefore be treated as an observed-session statistic, not a guaranteed server-wide count. Participation expires after 30 minutes, and tracking of surviving mobs restarts after `/reload`.
 
-## Ontwikkelen en controleren
+**Mobs/hour = kills recorded with the timer ON × 3600 / active stopwatch seconds.** The total counter still increases while paused, but paused kills and paused time do not enter the hourly rate. Zero measured time produces zero. This is an average for the session, not a rolling last-hour statistic.
 
-Er zijn geen runtime-afhankelijkheden of builds nodig: WoW laadt `Core.lua`, `Tracking.lua` en `Main.lua` in die volgorde via het `.toc`-bestand. Gebruik de bestaande checkout; cloudtaken zijn al geïsoleerd en hebben geen extra Git-worktree nodig.
+## Item shares
 
-Voor de tests heb je Python 3 en de Lua 5.1-runtime van Lupa nodig:
+**Item share = units of that item / all original dropped item units × 100.** For example, 10 cloth and 5 swords means 66.7% cloth and 33.3% swords. Stack quantities count; the number of log rows does not. Link variations with the same item ID are grouped together.
+
+Money, currencies and disenchant results are excluded from the original-drop denominator. A sword remains an original sword drop after disenchanting, so destroying it does not change the historical drop percentages. These percentages are not drop chance per mob, current inventory proportions or gold value.
+
+Disenchant materials appear separately. The Statistics export also reports the distribution within those materials.
+
+## Disenchanting
+
+Your own **Disenchant** casts are tracked through the client-specific spell events. On the old English client, this uses the spell name, cast duration, completion/interruption messages and bag changes. Materials in the associated loot window are labelled **DE material** and do not inflate original-drop percentages. Failed or interrupted casts do not mark an original item.
+
+A before/after bag comparison attempts to identify the consumed original. Exactly one removed item can mark the newest eligible logged entry with that item ID. The original row and quantity remain intact; **DE: 1** means one unit was disenchanted. Materials can still be recorded when the original was never in the log.
+
+If bag data is missing, more than one item disappears, or the cast start was missed, the addon does not guess the original. Select the relevant loot entry and use **Disenchanted +1** or **Undo DE -1**. Multiple identical originals can require manual correction because an item ID does not uniquely identify its earlier drop source.
+
+Disenchanting by another player is not automatically linked to your recorded originals. You can mark the original manually; automatic material classification requires your own observed cast and its loot window. The addon never performs disenchant actions.
+
+## Log files and saved data
+
+Standard WoW addon APIs cannot write an arbitrary text file. Use **Export log** to copy the text into an external editor. Loot entries include date/time, session time, type, item, quantity, quality, source, item-link data, origin (`drop` or `disenchant`) and disenchant count. Export order is oldest first; embedded tabs and line breaks are escaped.
+
+On logout or `/reload`, WoW writes the per-character database to:
+
+```text
+WTF/Account/<account>/<realm>/<character>/SavedVariables/ClassicLootLog.lua
+```
+
+Loot, mob counts, timer state and DE marks survive between sessions. Edit saved files only while WoW is closed. A crash can lose changes made since the last save. Existing version 1.x records are preserved during migration.
+
+There is no fixed history limit. Export and reset periodically during long sessions to keep memory and file size manageable. Money uses the text reported by the loot window; its quantity column is not guaranteed to represent copper.
+
+## Development and validation
+
+WoW loads `Compat.lua`, `Core.lua`, `Tracking.lua` and `Main.lua` in that order. No build or runtime dependencies are needed by the addon. Use the existing checkout in cloud tasks; they are already isolated and do not need extra Git worktrees.
+
+The Python test runner uses Lupa for Lua 5.1 regression tests:
 
 ```sh
 cd Test-plugin
@@ -94,15 +112,19 @@ python3 -m venv .venv
 .venv/bin/python tests/run.py
 ```
 
-De tests controleren lootontdubbeling, meerdere bronnen, gedeeltelijk looten, reset, export, timeropslag, groepskills, het uurgemiddelde, itempercentages, opslagmigratie en onttoveren met vertraagde of ontbrekende gegevens. Ze draaien met **Lua 5.1**, met gesimuleerde WoW-events en UI-controls, en vervangen geen test in de echte WoW-client.
+For OctoWoW compatibility, additionally run with an actual **Lua 5.0** interpreter:
 
-Maak een distributie zonder testbestanden:
+```sh
+.venv/bin/python tests/run.py --lua50 /path/to/lua5.0
+```
+
+That command parses every addon file with Lua 5.0 and executes the compatible core, adapter, legacy tracking and strict Vanilla UI suites. The Vanilla mocks deliberately omit modern APIs and pass event arguments through `this`, `event` and `arg1` globals. Tests cover the reported startup error, fourth-return loot quality, English labels, classic frame style, timer fallback, item shares, kill tracking, DE and export. These checks do not replace validation inside the real OctoWoW client.
+
+A minimal package can be created with:
 
 ```sh
 mkdir -p dist
 python3 -m zipfile -c dist/ClassicLootLog.zip ClassicLootLog
 ```
 
-Controleer in de game: open `/cll`, zet de timer aan, loot met en zonder automatisch looten, heropen een gedeeltelijk geloot lijk, pauzeer/hervat de timer, kopieer de logexport, controleer `/reload`-opslag en bevestig/annuleer een reset. Controleer ook geld, meerdere gelijke stacks en de tooltip/Shift+klik.
-
-Controleer daarna eigen kills, petkills en groepskills (één gedeelde mob telt één keer), het gemiddelde na een timerpauze en de itempercentages. Onttover een bijgehouden item en controleer dat de originele regel een DE-markering krijgt, de materialen apart staan en de droppercentages gelijk blijven. Annuleer ook een cast, corrigeer een markering handmatig en exporteer beide overzichten.
+In-game checks: open `/cll`, loot items and coins, reopen a partial corpse, pause/resume the timer, observe personal/pet/group kills, check item shares, disenchant a logged item, cancel another cast, correct a DE mark, export both views, test tooltips/Shift-click, reload to check persistence, and confirm/cancel reset.

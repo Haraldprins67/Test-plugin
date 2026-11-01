@@ -1,4 +1,5 @@
 local ns = {}
+ClassicLootLogNS = ns
 assert(loadfile("ClassicLootLog/Core.lua"))("ClassicLootLog", ns)
 local Core = ns.Core
 local tests, passed = {}, 0
@@ -181,10 +182,10 @@ tests["exports retain transformations and include separate numeric summaries"] =
     Core.RecordMobKill(db, "mob", "Wolf", 1000, 60)
     local log, summary = Core.Export(db), Core.ExportSummary(db, 60)
     equal(select(2, log:gsub("\n", "")), 2)
-    assert(log:find("Herkomst\tOnttoverd", 1, true))
+    assert(log:find("Origin\tDisenchanted", 1, true))
     assert(log:find("\tdrop\t1", 1, true))
     assert(log:find("\tdisenchant\t0", 1, true))
-    assert(summary:find("Mobs per uur\t60.00", 1, true))
+    assert(summary:find("Mobs per hour\t60.00", 1, true))
     assert(summary:find("Item\\tOne\t1\t100.00%\t1", 1, true))
     assert(summary:find("Dust\\nNew\t2\t100.00%", 1, true))
 end

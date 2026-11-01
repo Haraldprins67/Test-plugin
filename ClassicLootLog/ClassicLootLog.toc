@@ -1,10 +1,11 @@
-## Interface: 11509
+## Interface: 11200
 ## Title: Classic Loot Log
-## Notes: Lootlog, mobcounter, mobs per uur, itempercentages en onttoveren.
+## Notes: OctoWoW loot log, group mob counter, item shares and disenchant tracking.
 ## Author: Haraldprins67
-## Version: 1.1.0
+## Version: 1.2.0
 ## SavedVariablesPerCharacter: ClassicLootLogDB
 
+Compat.lua
 Core.lua
 Tracking.lua
 Main.lua

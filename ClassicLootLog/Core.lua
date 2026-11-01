@@ -1,11 +1,18 @@
-local _, ns = ...
+ClassicLootLogNS = ClassicLootLogNS or {}
+local ns = ClassicLootLogNS
 local Core = {}
 ns.Core = Core
 
 local floor, max = math.floor, math.max
+local getn, mod = table.getn, math.mod
+
+local function match(value, pattern)
+    local _, _, captured = string.find(value, pattern)
+    return captured
+end
 
 local function number(value, fallback)
-    if type(value) == "number" and value == value and value ~= math.huge and value ~= -math.huge then
+    if type(value) == "number" and value == value and value - value == 0 then
         return value
     end
     return fallback or 0
@@ -71,7 +78,7 @@ end
 
 function Core.FormatElapsed(seconds)
     seconds = positiveInteger(seconds)
-    return string.format("%02d:%02d:%02d", floor(seconds / 3600), floor(seconds / 60) % 60, seconds % 60)
+    return string.format("%02d:%02d:%02d", floor(seconds / 3600), mod(floor(seconds / 60), 60), mod(seconds, 60))
 end
 
 function Core.Reset(db, now)
@@ -88,7 +95,7 @@ function Core.RecordMobKill(db, guid, name, timestamp, clock)
     db.mobs.seen[guid] = true
     db.mobs.total = db.mobs.total + 1
     if db.timer.enabled then db.mobs.timed = db.mobs.timed + 1 end
-    db.mobs.kills[#db.mobs.kills + 1] = {
+    db.mobs.kills[getn(db.mobs.kills) + 1] = {
         guid = guid, name = text(name, guid), timestamp = number(timestamp),
         elapsed = db.timer.enabled and Core.TimerElapsed(db, clock) or nil,
     }
@@ -104,9 +111,9 @@ function Core.MobStats(db, clock)
 end
 
 function Core.ItemKey(link, name)
-    local itemID = text(link):match("item:(%d+)")
+    local itemID = match(text(link), "item:(%d+)")
     if itemID then return "item:" .. tostring(tonumber(itemID)) end
-    return "name:" .. text(name, "Onbekend item")
+    return "name:" .. text(name, "Unknown item")
 end
 
 local function identity(slot)
@@ -115,7 +122,7 @@ local function identity(slot)
         return "money"
     end
     if kind == "item" then
-        return kind .. ":" .. text(slot.link, text(slot.name, "Onbekend item"))
+        return kind .. ":" .. text(slot.link, text(slot.name, "Unknown item"))
     end
     return kind .. ":" .. text(slot.link, text(slot.name, kind))
 end
@@ -127,12 +134,12 @@ local function addObservation(observed, ordered, slot, guid, quantity)
     -- Length-prefix the GUID so caller-provided strings cannot collide.
     -- Keep version-1 drop keys valid, while separating transformed materials.
     local origin = slot.origin == "disenchant" and "disenchant:" or ""
-    local key = origin .. #guid .. ":" .. guid .. identity(slot)
+    local key = origin .. string.len(guid) .. ":" .. guid .. identity(slot)
     local row = observed[key]
     if not row then
         row = { key = key, slot = slot, guid = guid, quantity = 0 }
         observed[key] = row
-        ordered[#ordered + 1] = row
+        ordered[getn(ordered) + 1] = row
     end
     row.quantity = row.quantity + quantity
 end
@@ -166,7 +173,7 @@ function Core.AddSnapshot(db, slots, timestamp, clock)
                 timestamp = number(timestamp),
                 elapsed = db.timer.enabled and Core.TimerElapsed(db, clock) or nil,
                 link = text(slot.link),
-                name = text(slot.name, "Onbekend item"),
+                name = text(slot.name, "Unknown item"),
                 icon = slot.icon,
                 quantity = observation.quantity - previous,
                 quality = positiveInteger(slot.quality),
@@ -176,7 +183,7 @@ function Core.AddSnapshot(db, slots, timestamp, clock)
                 source = observation.guid,
                 sourceLabel = text(slot.sourceLabel, observation.guid),
             }
-            db.entries[#db.entries + 1] = entry
+            db.entries[getn(db.entries) + 1] = entry
             db.nextID = db.nextID + 1
             db.seen[observation.key] = observation.quantity
             added = added + 1
@@ -190,7 +197,7 @@ function Core.MarkDisenchanted(db, itemLink, quantity, clock, entryID)
     local remaining = quantity == nil and 1 or positiveInteger(quantity)
     if remaining == 0 then return 0 end
     local key, marked = Core.ItemKey(itemLink), 0
-    for index = #db.entries, 1, -1 do
+    for index = getn(db.entries), 1, -1 do
         local entry = db.entries[index]
         if type(entry) == "table" and entry.kind == "item" and entry.origin ~= "disenchant"
             and (entryID == nil or entry.id == entryID)
@@ -212,7 +219,7 @@ end
 function Core.UnmarkDisenchanted(db, entryID, quantity)
     local requested = quantity == nil and 1 or positiveInteger(quantity)
     if requested == 0 or entryID == nil then return 0 end
-    for index = #db.entries, 1, -1 do
+    for index = getn(db.entries), 1, -1 do
         local entry = db.entries[index]
         if type(entry) == "table" and entry.id == entryID and entry.kind == "item" and entry.origin ~= "disenchant" then
             local removed = math.min(requested, positiveInteger(entry.disenchanted))
@@ -229,10 +236,10 @@ local function aggregateItem(rows, byKey, entry, quantity)
     local row = byKey[key]
     if not row then
         row = {
-            key = key, name = text(entry.name, "Onbekend item"), link = text(entry.link), icon = entry.icon,
+            key = key, name = text(entry.name, "Unknown item"), link = text(entry.link), icon = entry.icon,
             quantity = 0, disenchanted = 0, materials = 0, percent = 0,
         }
-        byKey[key], rows[#rows + 1] = row, row
+        byKey[key], rows[getn(rows) + 1] = row, row
     end
     row.quantity = row.quantity + quantity
     row.disenchanted = row.disenchanted + math.min(quantity, positiveInteger(entry.disenchanted))
@@ -271,13 +278,18 @@ end
 
 local function exportText(value)
     value = tostring(value or "")
-    value = value:gsub("|c%x%x%x%x%x%x%x%x", ""):gsub("|r", "")
-    value = value:gsub("|H.-|h(.-)|h", "%1")
-    return value:gsub("\\", "\\\\"):gsub("\t", "\\t"):gsub("\r", "\\r"):gsub("\n", "\\n")
+    value = string.gsub(value, "|c%x%x%x%x%x%x%x%x", "")
+    value = string.gsub(value, "|r", "")
+    value = string.gsub(value, "|H.-|h(.-)|h", "%1")
+    value = string.gsub(value, "\\", "\\\\")
+    value = string.gsub(value, "\t", "\\t")
+    value = string.gsub(value, "\r", "\\r")
+    value = string.gsub(value, "\n", "\\n")
+    return value
 end
 
 function Core.Export(db, timestampFormatter)
-    local lines = { "ID\tDatum/tijd\tSessietijd\tType\tItem\tAantal\tKwaliteit\tBron\tItemlink\tHerkomst\tOnttoverd" }
+    local lines = { "ID\tDate/time\tSession time\tType\tItem\tQuantity\tQuality\tSource\tItem link\tOrigin\tDisenchanted" }
     for _, entry in ipairs(db.entries) do
         local stamp = timestampFormatter and timestampFormatter(entry.timestamp) or tostring(entry.timestamp)
         local values = {
@@ -289,14 +301,14 @@ function Core.Export(db, timestampFormatter)
             entry.quantity,
             entry.quality,
             entry.sourceLabel or entry.source,
-            text(entry.link):match("|H(.-)|h") or entry.link,
+            match(text(entry.link), "|H(.-)|h") or entry.link,
             entry.origin == "disenchant" and "disenchant" or "drop",
             positiveInteger(entry.disenchanted),
         }
         for i = 1, 11 do
             values[i] = exportText(values[i])
         end
-        lines[#lines + 1] = table.concat(values, "\t")
+        lines[getn(lines) + 1] = table.concat(values, "\t")
     end
     return table.concat(lines, "\n")
 end
@@ -304,25 +316,25 @@ end
 function Core.ExportSummary(db, clock)
     local mobs, items = Core.MobStats(db, clock), Core.ItemStats(db)
     local lines = {
-        "Statistiek\tWaarde",
-        "Mobs totaal\t" .. mobs.total,
-        "Mobs met timer aan\t" .. mobs.timed,
-        "Actieve sessietijd\t" .. Core.FormatElapsed(mobs.elapsed),
-        "Mobs per uur\t" .. string.format("%.2f", mobs.perHour),
-        "Itemaantal oorspronkelijke drops\t" .. items.totalQuantity,
-        "Onttoverde oorspronkelijke items\t" .. items.totalDisenchanted,
-        "Onttovermaterialen\t" .. items.totalMaterials,
+        "Statistic\tValue",
+        "Total mobs\t" .. mobs.total,
+        "Mobs with timer running\t" .. mobs.timed,
+        "Active session time\t" .. Core.FormatElapsed(mobs.elapsed),
+        "Mobs per hour\t" .. string.format("%.2f", mobs.perHour),
+        "Original drop item quantity\t" .. items.totalQuantity,
+        "Disenchanted original items\t" .. items.totalDisenchanted,
+        "Disenchant materials\t" .. items.totalMaterials,
         "",
-        "Item\tAantal\tLootpercentage\tOnttoverd\tItem-ID",
+        "Item\tQuantity\tLoot share\tDisenchanted\tItem ID",
     }
     for _, row in ipairs(items.rows) do
-        lines[#lines + 1] = table.concat({exportText(row.name), row.quantity,
+        lines[getn(lines) + 1] = table.concat({exportText(row.name), row.quantity,
             string.format("%.2f%%", row.percent), row.disenchanted, exportText(row.key)}, "\t")
     end
-    lines[#lines + 1] = ""
-    lines[#lines + 1] = "Onttovermateriaal\tAantal\tMateriaalpercentage\tItem-ID"
+    lines[getn(lines) + 1] = ""
+    lines[getn(lines) + 1] = "Disenchant material\tQuantity\tMaterial share\tItem ID"
     for _, row in ipairs(items.materialRows) do
-        lines[#lines + 1] = table.concat({exportText(row.name), row.quantity,
+        lines[getn(lines) + 1] = table.concat({exportText(row.name), row.quantity,
             string.format("%.2f%%", row.percent), exportText(row.key)}, "\t")
     end
     return table.concat(lines, "\n")

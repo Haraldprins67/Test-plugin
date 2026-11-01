@@ -1,7 +1,9 @@
-"""Run the addon's Lua 5.1 tests outside WoW using the pinned Lupa runtime."""
+"""Exercise current and Vanilla WoW APIs, with an optional genuine Lua 5.0 run."""
 
 from pathlib import Path
+import argparse
 import os
+import subprocess
 import sys
 
 try:
@@ -11,6 +13,9 @@ except ImportError:
 
 
 def main() -> None:
+    parser = argparse.ArgumentParser(description=__doc__)
+    parser.add_argument("--lua50", help="Path to a genuine Lua 5.0 interpreter")
+    options = parser.parse_args()
     root = Path(__file__).resolve().parents[1]
     os.chdir(root)
     for suite in ("tests/core_spec.lua", "tests/stats_spec.lua", "tests/tracking_spec.lua",
@@ -18,6 +23,32 @@ def main() -> None:
         print(f"Running {suite} with Lua 5.1", flush=True)
         runtime = LuaRuntime(unpack_returned_tuples=True)
         runtime.execute(Path(suite).read_text(encoding="utf-8"), name=suite)
+
+    legacy_suites = (
+        "tests/lua50_core_spec.lua",
+        "tests/compat_spec.lua",
+        "tests/legacy_tracking_spec.lua",
+        "tests/legacy_ui_spec.lua",
+    )
+    for suite in legacy_suites:
+        print(f"Running {suite} with Lua 5.1", flush=True)
+        runtime = LuaRuntime(unpack_returned_tuples=True)
+        runtime.execute(Path(suite).read_text(encoding="utf-8"), name=suite)
+
+    if options.lua50:
+        subprocess.run(
+            [options.lua50, "-e", "assert(string.find(_VERSION, '^Lua 5%.0'), _VERSION)"],
+            check=True,
+        )
+        for source in sorted(Path("ClassicLootLog").glob("*.lua")):
+            print(f"Checking Lua 5.0 syntax: {source}", flush=True)
+            subprocess.run(
+                [options.lua50, "-e", f'assert(loadfile("{source.as_posix()}"))'],
+                check=True,
+            )
+        for suite in legacy_suites:
+            print(f"Running {suite} with Lua 5.0", flush=True)
+            subprocess.run([options.lua50, suite], check=True)
 
 
 if __name__ == "__main__":
