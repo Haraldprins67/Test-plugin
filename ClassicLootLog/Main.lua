@@ -10,6 +10,7 @@ local Tracker = ns.Tracker
 local Value = ns.Value
 local GroupEvents = ns.GroupEvents
 local Finance = ns.Finance
+local Money = ns.Money
 local Merchant = ns.Merchant
 local Mini = ns.Mini
 local FileExport = ns.FileExport
@@ -21,7 +22,7 @@ ns.App = App
 
 local COMMANDS = {
     {command = "/cll or /lootlog", description = "Open or close Classic Loot Log."},
-    {command = "/sl [show|hide]", description = "Toggle, show or hide the compact timer, kill count and mobs/hour window."},
+    {command = "/sl [show|hide]", description = "Show or hide the compact timer, kills, mobs/hour and received loot money."},
     {command = "/cll show / hide", description = "Show or hide the main window."},
     {command = "/cll commands", description = "Open this command reference (also: /cll help)."},
     {command = "/cll group", description = "Open the party / raid loot tracker."},
@@ -280,8 +281,8 @@ end
 function App:RefreshFinance()
     local summary = Finance.Summary(self.db)
     self.financeDropValue:SetText(Finance.FormatMoneyAlways(summary.dropCopper))
-    self.financeSalesValue:SetText(Finance.FormatMoneyAlways(summary.salesCopper))
-    self.financeNetValue:SetText(Finance.FormatMoneyAlways(summary.netSalesCopper))
+    self.financeSalesValue:SetText(Finance.FormatMoneyAlways(summary.actualSalesCopper))
+    self.financeNetValue:SetText(Finance.FormatMoneyAlways(summary.salesCopper))
     self.financeDropDetail:SetText(summary.unknownDropUnits > 0
         and ("Known subtotal; " .. summary.unknownDropUnits .. " original units have an unknown vendor price.")
         or (summary.totalDropUnits .. " original item units, including originals later disenchanted."))
@@ -518,8 +519,8 @@ function App:CreateExtraTabs(frame)
     self.financeScroll:SetScrollChild(self.financeChild)
     self.financeLabels = {
         drop = label(self.financeChild, "Original drop vendor value", 0, 0, 790, "GameFontNormal"),
-        sales = label(self.financeChild, "Actual vendor sales (gross)", 0, -80, 390, "GameFontNormal"),
-        net = label(self.financeChild, "Net vendor income", 410, -80, 380, "GameFontNormal"),
+        sales = label(self.financeChild, "Actual vendor sales (after buybacks)", 0, -80, 390, "GameFontNormal"),
+        net = label(self.financeChild, "Gross vendor sales", 410, -80, 380, "GameFontNormal"),
         materials = label(self.financeChild, "Disenchant materials produced", 0, -173, 790, "GameFontNormal"),
     }
     self.financeDropValue = label(self.financeChild, "", 0, -24, 790, "GameFontNormalLarge")
@@ -1077,6 +1078,7 @@ function App:Initialize()
     self.db = ClassicLootLogDB
     Value.Initialize(self.db)
     Finance.Initialize(self.db)
+    self.moneyTracker = Money.New(self.db, {onChange = function() self:Refresh() end})
     SavedLogs.Initialize(self.db)
     self.merchant = Merchant.New(self.db, {now = now, time = time, onChange = function() self:Refresh() end})
     self.mini = Mini.New(self.db, {now = now})
@@ -1096,10 +1098,11 @@ function App:Initialize()
         end,
     })
     StaticPopupDialogs[RESET_DIALOG] = {
-        text = "Reset all loot, vendor transactions, mob counts and session time?",
+        text = "Reset all loot, received loot money, vendor transactions, mob counts and session time?",
         button1 = "Reset", button2 = "Cancel",
         OnAccept = function()
             Core.Reset(self.db, now())
+            self.moneyTracker:Reset()
             self.tracker:Reset()
             self.merchant:Reset()
             self.db.groupLoot = {}
@@ -1210,6 +1213,7 @@ Compat.RegisterEvent(eventFrame, "UNIT_SPELLCAST_STOP")
 Compat.RegisterEvent(eventFrame, "BAG_UPDATE_DELAYED")
 Compat.RegisterEvent(eventFrame, "LOOT_SLOT_CLEARED")
 Compat.RegisterEvent(eventFrame, "MERCHANT_SHOW")
+Compat.RegisterEvent(eventFrame, "CHAT_MSG_MONEY")
 for _, eventName in ipairs(GroupEvents.Events) do Compat.RegisterEvent(eventFrame, eventName) end
 for _, eventName in ipairs(Merchant.Events) do Compat.RegisterEvent(eventFrame, eventName) end
 for _, eventName in ipairs(Tracker.LegacyEvents or {}) do
@@ -1219,6 +1223,7 @@ Compat.SetScript(eventFrame, "OnEvent", function(_, event, a, b, c, d)
     if App.tracker then App.tracker:HandleEvent(event, a, b, c, d) end
     if App.groupAdapter then App.groupAdapter:HandleEvent(event, a, b, c, d) end
     if App.merchant then App.merchant:HandleEvent(event, a, b, c, d) end
+    if App.moneyTracker then App.moneyTracker:HandleEvent(event, a) end
     if event == "ADDON_LOADED" then
         local name = a
         if name == addonName or name == launcherAddonName then

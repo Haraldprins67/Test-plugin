@@ -134,6 +134,9 @@ UISpecialFrames, SlashCmdList, StaticPopupDialogs = {}, {}, {}
 ChatFontNormal = {}
 NUM_BAG_SLOTS = 4
 LOOT_SLOT_ITEM, LOOT_SLOT_MONEY, LOOT_SLOT_CURRENCY = 1, 2, 3
+YOU_LOOT_MONEY = "You loot %s"
+LOOT_MONEY_SPLIT = "Your share of the loot is %s."
+GOLD, SILVER, COPPER = "Gold", "Silver", "Copper"
 function CreateFrame(kind, name, parent, template)
     if template == "UIPanelScrollFrameTemplate" then
         assert(type(name) == "string" and name ~= "", "Vanilla scroll templates require a global frame name")
@@ -262,6 +265,7 @@ assert(loadfile("ClassicLootLog/Value.lua"))()
 assert(loadfile("ClassicLootLog/GroupLoot.lua"))()
 assert(loadfile("ClassicLootLog/GroupEvents.lua"))()
 assert(loadfile("ClassicLootLog/Finance.lua"))()
+assert(loadfile("ClassicLootLog/Money.lua"))()
 assert(loadfile("ClassicLootLog/Merchant.lua"))()
 assert(loadfile("ClassicLootLog/Mini.lua"))()
 assert(loadfile("ClassicLootLog/FileExport.lua"))()
@@ -560,7 +564,7 @@ test("Vanilla master-loot slash rolls and EPGP bids retain method and receipt-co
     assert(string.find(ns.App.exportFrame.edit:GetText(), "Cara", 1, true))
 end)
 
-test("Vanilla slash sl toggles a separate three-metric view without opening the main frame", function()
+test("Vanilla slash sl toggles a separate four-metric view without opening the main frame", function()
     reset()
     ns.App.frame:Hide()
     ns.App.mini:Hide()
@@ -574,10 +578,55 @@ test("Vanilla slash sl toggles a separate three-metric view without opening the 
     for _, object in ipairs(frames) do
         if rawget(object, "parent") == ns.App.mini.frame and object.kind == "FontString" then count = count + 1 end
     end
-    equal(count, 3)
+    equal(count, 4)
     SlashCmdList.CLASSICLOOTLOGMINI("")
     equal(ns.App.mini.frame:IsShown(), false)
     equal(ClassicLootLogDB.ui.miniVisible, false)
+end)
+
+test("Vanilla money chat counts received personal and group shares while the main frame is hidden", function()
+    reset()
+    partyCount = 4
+    ns.App.frame:Hide()
+    ns.App.mini:Show()
+    targetGUID = "0xF13000MONEY0001"
+    slots = {{kind = "money", name = "99 Gold", quantity = 990000, quality = 0}}
+    dispatch("LOOT_OPENED")
+    dispatch("LOOT_CLOSED")
+    equal(ns.Money.Total(ClassicLootLogDB), 0)
+    dispatch("CHAT_MSG_MONEY", "You loot 1 Gold, 2 Silver, 3 Copper")
+    dispatch("CHAT_MSG_MONEY", "Your share of the loot is 25 Silver.")
+    dispatch("CHAT_MSG_MONEY", "Your share of the loot is 25 Silver.")
+    money = money + 50000
+    dispatch("PLAYER_MONEY")
+    dispatch("CHAT_MSG_SYSTEM", "You loot 99 Gold")
+    dispatch("CHAT_MSG_MONEY", "Alice loots 99 Gold")
+    tick(0.3)
+    equal(ns.Money.Total(ClassicLootLogDB), 15203)
+    equal(ClassicLootLogDB.lootMoney.sharedCopper, 5000)
+    equal(ns.App.mini.money:GetText(), "Loot money: 1g 52s 3c")
+    equal(ns.App.frame:IsShown(), false)
+    equal(ClassicLootLogDB.timer.enabled, false)
+    ns.App.mini:Hide()
+end)
+
+test("Vanilla loot money resets with the session while its saved report remains unchanged", function()
+    reset()
+    dispatch("CHAT_MSG_MONEY", "Your share of the loot is 1 Gold, 2 Silver, 3 Copper.")
+    local saved = ns.App:SaveAllLogs()
+    local report = saved.text
+    assert(string.find(report, "1g 2s 3c", 1, true))
+    ns.App.frame:Hide()
+    ns.App.mini:Show()
+    SlashCmdList.CLASSICLOOTLOG("reset")
+    popup.OnAccept()
+    tick(0.3)
+    equal(ns.Money.Total(ClassicLootLogDB), 0)
+    equal(ns.App.mini.money:GetText(), "Loot money: 0g 0s 0c")
+    equal(ns.SavedLogs.Get(ClassicLootLogDB, saved.id).text, report)
+    equal(ns.App.mini.frame:IsShown(), true)
+    equal(ns.App.frame:IsShown(), false)
+    ns.App.mini:Hide()
 end)
 
 test("Vanilla mini window refreshes via global OnUpdate arguments while the full UI stays hidden", function()
@@ -738,6 +787,9 @@ test("Vanilla sale hooks confirm real income through old money and bag events", 
     tick(0.3)
     equal(ns.Finance.Summary(ClassicLootLogDB).buybackCopper, 200)
     equal(ns.Finance.Summary(ClassicLootLogDB).netSalesCopper, 0)
+    equal(ns.App.financeSalesValue:GetText(), "0g 0s 0c")
+    equal(ns.App.financeNetValue:GetText(), "0g 2s 0c")
+    equal(ns.Money.Total(ClassicLootLogDB), 0)
     MerchantFrame:Hide()
     dispatch("MERCHANT_CLOSED")
     merchantAction = nil

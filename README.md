@@ -1,8 +1,8 @@
 # Classic Loot Log — OctoWoW
 
-**Version 1.7.0** targets **OctoWoW's WoW 1.12.1 / Lua 5.0 client** (`Interface: 11200`). It provides an English interface using the original WoW dialog background, decorative border, gold headings and standard buttons.
+**Version 1.8.0** targets **OctoWoW's WoW 1.12.1 / Lua 5.0 client** (`Interface: 11200`). It provides an English interface using the original WoW dialog background, decorative border, gold headings and standard buttons.
 
-**[Download ClassicLootLog-1.7.0-OctoWoW.zip](downloads/ClassicLootLog-1.7.0-OctoWoW.zip?raw=true)**
+**[Download ClassicLootLog-1.8.0-OctoWoW.zip](downloads/ClassicLootLog-1.8.0-OctoWoW.zip?raw=true)**
 
 ## Install or update
 
@@ -47,7 +47,7 @@ Version 1.2.1 uses Lua 5.0 syntax throughout the addon files, a shared namespace
 Open **Finances** or type **`/cll finance`**. This tab separates the three figures that should not be mixed together:
 
 1. **Original drop vendor value:** the known vendor-price subtotal of all original item quantities in the loot history, displayed as gold, silver and copper. Items later disenchanted still retain their original historical drop value. Disenchant materials, looted coins and currencies are not added to this original-drop subtotal. SellValue, manual overrides and the existing price providers supply estimates; unknown-price units are counted explicitly rather than treated as a complete zero-valued total.
-2. **Actual vendor sales (gross):** income from confirmed sales while this addon is running. **Net vendor income** additionally subtracts confirmed buybacks, which are shown separately. These are recorded transactions, not a conversion of the estimated loot value or a change in your overall character balance.
+2. **Actual vendor sales:** confirmed sale income minus confirmed buybacks. Buying an item back reduces this displayed amount; selling it again increases it again. **Gross vendor sales** and the total spent on buybacks remain visible separately, with the original transaction records retained in the ledger. Unconfirmed buybacks do not reduce the total. These are recorded transactions, not a conversion of estimated loot value or a change in your overall character balance.
 3. **Disenchant materials produced:** a list of the actual observed essences, shards, dust and other materials with their quantities. These are produced-history counts, not current inventory; selling the resulting material does not erase the fact it was produced.
 
 The tab scrolls when the window is small or there are many material types. Its values use explicit gold/silver/copper denominations, including zeros. **`/cll log`** from this tab opens a copyable financial ledger; **Save log** includes the same summary and transaction details in the complete archived report.
@@ -58,11 +58,15 @@ The observer watches right-click sales, normal bag-to-vendor drag sales, split-s
 
 Looted money, quest rewards, trades, repairs and arbitrary balance increases with no observed sale action do not become vendor income. Ambiguous or incomplete transactions are kept in an **unconfirmed** ledger and excluded from confirmed totals; the count appears in the tab and the reasons are included in the export. The observer never clicks, sells or buys items itself.
 
-Sales of items that were already in your bags are included even if their original drop was not in this addon's history. The financial ledger starts with this version: earlier actual sales cannot be reconstructed retroactively. Confirmed sales and buybacks persist between logins; **Reset** clears the session ledger along with loot and mob history, while preserving UI preferences and price overrides.
+Sales of items that were already in your bags are included even if their original drop was not in this addon's history. The financial ledger was introduced in version 1.6.0; sales from before tracking began cannot be reconstructed retroactively. Confirmed sales and buybacks persist between logins; **Reset** clears the session ledger along with loot and mob history, while preserving UI preferences and price overrides.
 
 ## Compact `/sl` window
 
-Type **`/sl`** to show or hide a small movable window containing only **Mobs/hour**, **Time** and **Kills**. It uses the same stopwatch and counters as the full interface, and updates independently while the main window is closed. The total kill count includes paused kills; the hourly rate still uses only kills and time with the stopwatch running. A paused timer is labelled `(paused)`.
+Type **`/sl`** to show or hide a small movable window containing **Mobs/hour**, **Time**, **Kills** and **Loot money**. It uses the same stopwatch and counters as the full interface, and updates independently while the main window is closed. The total kill count includes paused kills; the hourly rate still uses only kills and time with the stopwatch running. A paused timer is labelled `(paused)`.
+
+**Loot money** shows the coins you actually received as gold, silver and copper, including your own share of shared party or raid loot. The counter uses personal money-receipt messages, so it does not count the whole corpse amount, another player's share or divide your reported share a second time. It continues counting while the stopwatch is paused. Vendor income, buybacks, quest rewards, trades and unrelated wallet changes are excluded.
+
+The received-money counter starts at zero when updating from an earlier version: old loot-window money rows cannot reliably identify how much you personally received. It persists across logout or `/reload` and resets with the session.
 
 Use `/sl show` or `/sl hide` for explicit control. Drag the panel to move it. Visibility is remembered per character. Timer controls remain `/cll timer on` and `/cll timer off`; resetting the session also resets the mini window's displayed values.
 
@@ -72,7 +76,7 @@ Click the small **Classic Loot Log** icon beside the minimap with the **left mou
 
 ## Saved Logs
 
-Open the **Saved Logs** tab or type **`/cll logs`** to review archived reports inside the addon. Click **Save log**, including in the copy/export dialog, or use **`/cll save`** to save a complete snapshot containing all retained personal loot, item/vendor statistics, party/raid choices, rolls, bids, receipts, unresolved awards, finances, disenchant materials and observed mob kills. A snapshot includes records outside the visible tab and does not change when the live session changes.
+Open the **Saved Logs** tab or type **`/cll logs`** to review archived reports inside the addon. Click **Save log**, including in the copy/export dialog, or use **`/cll save`** to save a complete snapshot containing all retained personal loot, item/vendor statistics, party/raid choices, rolls, bids, receipts, unresolved awards, finances, received loot-money totals, disenchant materials and observed mob kills. A snapshot includes records outside the visible tab and does not change when the live session changes.
 
 Each report is titled with the client-local date, time and logging character, for example:
 
@@ -122,7 +126,7 @@ Open contexts restored after `/reload` are archived as unresolved, so new bids c
 
 | Control | Action |
 | --- | --- |
-| **Reset** | Asks for confirmation, then clears loot, mob counts, disenchant marks and elapsed time. A running stopwatch restarts at zero. |
+| **Reset** | Asks for confirmation, then clears loot, received loot money, vendor transactions, mob counts, disenchant marks and elapsed time. A running stopwatch restarts at zero. |
 | **Save log** | Archives a complete report inside CLL and opens Saved Logs. Use `/cll log` for an optional copyable TSV view. |
 | **Saved Logs** | Save and reopen complete snapshots without an external program. |
 | **Minimap icon** | Left-click to toggle CLL; hold Ctrl+Shift and drag with the left mouse button to reposition it. |
@@ -139,7 +143,7 @@ The list records loot while the window is hidden and while the timer is paused. 
 | Command | Action |
 | --- | --- |
 | `/cll` or `/lootlog` | Toggle the main window |
-| `/sl` / `/sl show` / `/sl hide` | Toggle, show or hide the three-metric mini window |
+| `/sl` / `/sl show` / `/sl hide` | Toggle, show or hide the mini window with mobs/hour, timer, kills and received loot money |
 | `/cll save` | Archive a complete snapshot inside CLL, independent of the selected tab |
 | `/cll logs` | Open the Saved Logs archive |
 | `/cll show` / `/cll hide` | Show / hide the window |
@@ -233,13 +237,13 @@ On logout or `/reload`, WoW writes the per-character database to:
 WTF/Account/<account>/<realm>/<character>/SavedVariables/ClassicLootLog.lua
 ```
 
-Loot, mob counts, timer state, DE marks, minimap position and saved reports survive between sessions. Edit saved files only while WoW is closed. A crash can lose changes made since the last save. Existing version 1.x records are preserved during migration.
+Loot, received loot-money totals, vendor transactions, mob counts, timer state, DE marks, minimap position and saved reports survive between sessions. Edit saved files only while WoW is closed. A crash can lose changes made since the last save. Existing version 1.x records are preserved during migration.
 
-There is no fixed history limit. Resetting the live session preserves saved reports, so the archive also contributes to memory and saved-data size. Money uses the text reported by the loot window; its quantity column is not guaranteed to represent copper.
+There is no fixed history limit. Resetting the live session preserves saved reports, so the archive also contributes to memory and saved-data size. Money rows in the loot list use the text reported by the loot window; their quantity column is not guaranteed to represent copper. The separate **Loot money** counter uses confirmed personal money-receipt messages instead.
 
 ## Development and validation
 
-WoW loads `Compat.lua`, `Core.lua`, `Tracking.lua`, `Value.lua`, `GroupLoot.lua`, `GroupEvents.lua`, `Finance.lua`, `Merchant.lua`, `Mini.lua`, `FileExport.lua`, `SavedLogs.lua`, `MinimapButton.lua`, `LogsPanel.lua` and `Main.lua` in that order. The manual and launcher TOCs reference the same files. No build or runtime dependencies are needed by the addon. Use the existing checkout in cloud tasks; they are already isolated and do not need extra Git worktrees.
+WoW loads `Compat.lua`, `Core.lua`, `Tracking.lua`, `Value.lua`, `GroupLoot.lua`, `GroupEvents.lua`, `Finance.lua`, `Money.lua`, `Merchant.lua`, `Mini.lua`, `FileExport.lua`, `SavedLogs.lua`, `MinimapButton.lua`, `LogsPanel.lua` and `Main.lua` in that order. The manual and launcher TOCs reference the same files. No build or runtime dependencies are needed by the addon. Use the existing checkout in cloud tasks; they are already isolated and do not need extra Git worktrees.
 
 The Python test runner uses Lupa for Lua 5.1 regression tests:
 
@@ -256,7 +260,7 @@ For OctoWoW compatibility, additionally run with an actual **Lua 5.0** interpret
 .venv/bin/python tests/run.py --lua50 /path/to/lua5.0
 ```
 
-That command parses every addon file with Lua 5.0 and executes the compatible core, adapter, legacy tracking and strict Vanilla UI suites. The Vanilla mocks deliberately omit modern APIs and pass event arguments through `this`, `event` and `arg1` globals. They exercise both addon folder identities, resizing, text scaling, price lookup, epic notices, minimap dragging and the saved-log archive. A distribution check validates both TOC entry points. Tests cover the reported startup error, fourth-return loot quality, English labels, classic frame style, timer fallback, item shares, kill tracking, DE and export. These checks do not replace validation inside the real OctoWoW client.
+That command parses every addon file with Lua 5.0 and executes the compatible core, adapter, legacy tracking and strict Vanilla UI suites. The Vanilla mocks deliberately omit modern APIs and pass event arguments through `this`, `event` and `arg1` globals. They exercise both addon folder identities, resizing, text scaling, price lookup, epic notices, minimap dragging, personal/shared money receipts, buyback correction and the saved-log archive. A distribution check validates both TOC entry points. Tests cover the reported startup error, fourth-return loot quality, English labels, classic frame style, timer fallback, item shares, kill tracking, DE and export. These checks do not replace validation inside the real OctoWoW client.
 
 A minimal package can be created with:
 
@@ -273,4 +277,4 @@ For party/raid validation, test a native Need/Greed roll including a tied score,
 
 For archive validation, save a report, change the live session, and reopen the saved snapshot. Save twice in the same second, reset the session and reload to verify that both reports remain distinct and readable. Check migration of older queued reports. Left-click the minimap icon, then Ctrl+Shift+left-drag it and verify its position after reload. Confirm `/sl` still updates with the main window hidden.
 
-For financial validation, sell a known stack, sell multiple stacks with auto-repair, buy an item back, receive unrelated money with a vendor open, and compare the confirmed gross/net values. Disenchant a logged original and check that its gross drop value remains while the produced essence/shard counts increase. Verify financial export and persistence across reload.
+For financial validation, sell a known stack, sell multiple stacks with auto-repair, buy an item back, receive unrelated money with a vendor open, and confirm that **Actual vendor sales** decreases after each confirmed buyback while gross sales remain unchanged. Loot coins alone and in a group, compare the mini window with your own receipt message, and check that another player's receipt, vendor income and quest rewards do not inflate **Loot money**. Disenchant a logged original and check that its gross drop value remains while the produced essence/shard counts increase. Verify financial export and persistence across reload.

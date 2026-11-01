@@ -31,6 +31,8 @@ ns.Value = {GetUnitPrice = function(db, link)
     return prices[id]
 end}
 dofile("ClassicLootLog/Merchant.lua")
+dofile("ClassicLootLog/Core.lua")
+dofile("ClassicLootLog/Finance.lua")
 local Merchant = ns.Merchant
 
 local function equal(actual, expected, message)
@@ -71,7 +73,10 @@ local function installNatives()
         local row = history[index]
         if row and not suppressMutation then
             balance = balance - row.copper - extraCost
-            bags["0:4"] = item(row.key, row.quantity)
+            for slot = 4, 1, -1 do
+                local key = "0:" .. slot
+                if not bags[key] then bags[key] = item(row.key, row.quantity); break end
+            end
             table.remove(history, index)
         end
         return "buyback native"
@@ -230,6 +235,56 @@ test("buying an item back records the actual debit separately from gross sale in
     equal(db.finance.buybackCopper, 50)
     equal(db.finance.buybacks[1].quantity, 5)
     equal(db.finance.salesCopper - db.finance.buybackCopper, 0)
+    equal(ns.Finance.Summary(db).actualSalesCopper, 0)
+end)
+
+test("immediate sell buyback and resell correct actual income once per confirmed transaction", function()
+    put(1, 1, 5); prices["1"] = 10
+    local observer, db = tracker()
+    UseContainerItem(0, 1)
+    BuybackItem(1)
+    UseContainerItem(0, 4)
+    observer:HandleEvent("PLAYER_MONEY"); observer:HandleEvent("BAG_UPDATE"); flush()
+    local summary = ns.Finance.Summary(db)
+    equal(summary.salesCopper, 100)
+    equal(summary.buybackCopper, 50)
+    equal(summary.actualSalesCopper, 50)
+    equal(table.getn(summary.sales), 2)
+    equal(table.getn(summary.buybacks), 1)
+    observer:HandleEvent("BAG_UPDATE"); observer:HandleEvent("PLAYER_MONEY"); flush()
+    equal(ns.Finance.Summary(db).actualSalesCopper, 50)
+end)
+
+test("successive identical buybacks correct both stack sales and survive another login", function()
+    put(1, 1, 2); put(2, 1, 2); prices["1"] = 25
+    local observer, db = tracker()
+    UseContainerItem(0, 1); UseContainerItem(0, 2); flush()
+    equal(ns.Finance.Summary(db).actualSalesCopper, 100)
+    BuybackItem(1); BuybackItem(1); flush()
+    equal(db.finance.salesCopper, 100)
+    equal(db.finance.buybackCopper, 100)
+    equal(table.getn(db.finance.buybacks), 2)
+    equal(ns.Finance.Summary(db).actualSalesCopper, 0)
+    local reloaded = Merchant.New(db, {now = GetTime, time = time})
+    reloaded:InstallHooks()
+    reloaded:HandleEvent("PLAYER_MONEY"); flush()
+    equal(ns.Finance.Summary(db).actualSalesCopper, 0)
+    equal(table.getn(db.finance.buybacks), 2)
+end)
+
+test("failed buyback and unrelated wallet loss cannot reduce actual vendor sales", function()
+    put(1, 1, 5); prices["1"] = 10
+    local observer, db = tracker()
+    UseContainerItem(0, 1); flush()
+    suppressMutation = true
+    BuybackItem(1)
+    balance = balance - 50
+    observer:HandleEvent("PLAYER_MONEY"); flush()
+    equal(db.finance.salesCopper, 50)
+    equal(db.finance.buybackCopper, 0)
+    equal(ns.Finance.Summary(db).actualSalesCopper, 50)
+    equal(table.getn(db.finance.unconfirmed), 1)
+    equal(db.finance.unconfirmed[1].kind, "buyback")
 end)
 
 test("late events can complete a final sale after the merchant frame closes", function()

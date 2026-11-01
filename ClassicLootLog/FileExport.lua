@@ -86,7 +86,7 @@ function FileExport.BuildReport(db, groupModel, options)
         return formatDate(options, "%Y-%m-%d %H:%M:%S", value)
     end
     local lines = {
-        "Classic Loot Log export\t1.7.0",
+        "Classic Loot Log export\t1.8.0",
         "Logged by\t" .. cleanText(playerName(options)),
         "Exported\t" .. cleanText(dateTime(stamp)),
         "Scope\tAll currently retained records for this character, not only the visible tab.",
@@ -107,6 +107,15 @@ function FileExport.BuildReport(db, groupModel, options)
     lines[getn(lines) + 1] = ""
     lines[getn(lines) + 1] = "=== FINANCES, VENDOR SALES AND DISENCHANT MATERIALS ==="
     if ns.Finance and ns.Finance.Export then lines[getn(lines) + 1] = ns.Finance.Export(db) end
+    lines[getn(lines) + 1] = ""
+    lines[getn(lines) + 1] = "=== RECEIVED LOOT MONEY ==="
+    if ns.Money then
+        local total = ns.Money.Total(db)
+        lines[getn(lines) + 1] = "Received loot money\t" .. tostring(total) .. "\t" .. ns.Money.Format(total)
+        local shared = ns.Money.Initialize(db).sharedCopper
+        lines[getn(lines) + 1] = "Group share (included in total)\t" .. tostring(shared) .. "\t" .. ns.Money.Format(shared)
+        lines[getn(lines) + 1] = "Basis\tPersonal loot money and your received share of group money; excludes vendor sales and unrelated balance changes."
+    end
     lines[getn(lines) + 1] = ""
     lines[getn(lines) + 1] = "=== OBSERVED MOB KILLS ==="
     lines[getn(lines) + 1] = "Date/time\tSession time\tName\tGUID"

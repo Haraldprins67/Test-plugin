@@ -1,7 +1,7 @@
--- Three session metrics in a separate Vanilla-compatible movable window.
+-- Compact session metrics in a separate Vanilla-compatible movable window.
 ClassicLootLogNS = ClassicLootLogNS or {}
 local ns = ClassicLootLogNS
-local Core, Compat = ns.Core, ns.Compat
+local Core, Compat, Money = ns.Core, ns.Compat, ns.Money
 local Mini = {}
 Mini.__index = Mini
 ns.Mini = Mini
@@ -15,7 +15,7 @@ end
 local function metric(frame, y)
     local text = frame:CreateFontString(nil, "OVERLAY", "GameFontNormal")
     text:SetPoint("TOPLEFT", frame, "TOPLEFT", 18, y)
-    text:SetWidth(196)
+    text:SetWidth(228)
     text:SetHeight(20)
     text:SetJustifyH("LEFT")
     return text
@@ -27,7 +27,7 @@ function Mini.New(db, callbacks)
     local frame = CreateFrame("Frame", "ClassicLootLogMiniFrame", UIParent,
         BackdropTemplateMixin and "BackdropTemplate" or nil)
     self.frame = frame
-    Compat.SetSize(frame, 238, 112)
+    Compat.SetSize(frame, 270, 139)
     frame:SetPoint("CENTER", UIParent, "CENTER", 0, 0)
     frame:SetFrameStrata("DIALOG")
     frame:SetClampedToScreen(true)
@@ -47,6 +47,7 @@ function Mini.New(db, callbacks)
     self.mobsPerHour = metric(frame, -17)
     self.timer = metric(frame, -44)
     self.kills = metric(frame, -71)
+    self.money = metric(frame, -98)
     local close = CreateFrame("Button", nil, frame, "UIPanelCloseButton")
     close:SetPoint("TOPRIGHT", frame, "TOPRIGHT", -1, -1)
     Compat.SetScript(frame, "OnHide", function()
@@ -77,6 +78,7 @@ function Mini:Refresh()
     self.timer:SetText("Time: " .. Core.FormatElapsed(stats.elapsed)
         .. (self.db.timer.enabled and "" or " (paused)"))
     self.kills:SetText("Kills: " .. tostring(stats.total))
+    self.money:SetText("Loot money: " .. Money.Format(Money.Total(self.db)))
 end
 
 function Mini:Show()

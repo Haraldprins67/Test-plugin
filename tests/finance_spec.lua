@@ -115,6 +115,7 @@ test("confirmed gross sales buybacks and uncertain records remain separate", fun
     equal(summary.salesCopper, 12345)
     equal(summary.buybackCopper, 345)
     equal(summary.netSalesCopper, 12000)
+    equal(summary.actualSalesCopper, 12000)
     equal(summary.unconfirmedSales, 1)
     equal(summary.unconfirmedBuybacks, 1)
     equal(summary.unconfirmedTransactions, 2)
@@ -131,6 +132,26 @@ test("all denominations and negative net income format without inventing unknown
     equal(Finance.FormatMoneyAlways(1 / 0), "Unknown")
     local db = Finance.Initialize({finance = {salesCopper = -1, buybackCopper = 10}})
     equal(Finance.Summary(db).netSalesCopper, -10)
+    equal(Finance.Summary(db).actualSalesCopper, -10)
+end)
+
+test("actual vendor sales correct confirmed buybacks without erasing gross history", function()
+    local db = database()
+    db.finance = {salesCopper = 10050, buybackCopper = 50,
+        sales = {{quantity = 1, copper = 50}, {quantity = 1, copper = 10000}},
+        buybacks = {{quantity = 1, copper = 50}},
+        unconfirmed = {{kind = "buyback", quantity = 1, copper = 10000}},
+    }
+    local summary = Finance.Summary(db)
+    equal(summary.actualSalesCopper, 10000)
+    equal(summary.salesCopper, 10050)
+    equal(summary.buybackCopper, 50)
+    equal(table.getn(summary.sales), 2)
+    equal(summary.unconfirmedBuybacks, 1)
+    local report = Finance.Export(db)
+    assert(string.find(report, "Actual vendor sales (after buybacks)\t10000\t1g 0s 0c", 1, true))
+    assert(string.find(report, "Confirmed gross vendor sales\t10050\t1g 0s 50c", 1, true))
+    assert(string.find(report, "Confirmed buybacks\t50\t0g 0s 50c", 1, true))
 end)
 
 test("malformed financial metadata is normalized without changing existing records", function()

@@ -95,6 +95,7 @@ function Core.Reset(db, now)
     db.mobs = { total = 0, timed = 0, seen = {}, kills = {} }
     db.groupLoot = { entries = {}, unassigned = {}, nextID = 1 }
     db.finance = {salesCopper = 0, buybackCopper = 0, sales = {}, buybacks = {}, unconfirmed = {}}
+    if ns.Money then ns.Money.Reset(db) else db.lootMoney = nil end
 end
 
 function Core.RecordMobKill(db, guid, name, timestamp, clock)
