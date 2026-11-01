@@ -1,0 +1,10 @@
+## Interface: 11509
+## Title: Classic Loot Log
+## Notes: Lootlog, mobcounter, mobs per uur, itempercentages en onttoveren.
+## Author: Haraldprins67
+## Version: 1.1.0
+## SavedVariablesPerCharacter: ClassicLootLogDB
+
+Core.lua
+Tracking.lua
+Main.lua
