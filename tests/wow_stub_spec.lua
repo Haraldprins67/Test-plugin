@@ -1361,4 +1361,56 @@ test("financial exports include actual sales and DE counts without converting es
     equal(ns.Finance.Summary(ClassicLootLogDB).totalMaterials, 0)
 end)
 
+test("timer button pauses immediately in every tab and excludes all paused seconds", function()
+    for _, tab in ipairs({"loot", "commands", "group", "finance", "logs"}) do
+        resetSession()
+        ns.App.frame:Show()
+        ns.App.mini:Show()
+        SlashCmdList.CLASSICLOOTLOG("timer on")
+        ns.App:SetTab(tab)
+        equal(ns.App.timerButton:GetText(), "Timer: ON", tab)
+        clock = clock + 7
+        ns.App.timerButton.scripts.OnClick(ns.App.timerButton, "LeftButton")
+        equal(ClassicLootLogDB.timer.enabled, false, tab)
+        equal(ns.App.timerButton:GetText(), "Timer: OFF", tab)
+        equal(ns.Core.TimerElapsed(ClassicLootLogDB, clock), 7, tab)
+        assert(ns.App.mini.timer:GetText():find("paused", 1, true), tab)
+        clock = clock + 20
+        ns.App.frame.scripts.OnUpdate(ns.App.frame, 20)
+        ns.App.mini.frame.scripts.OnUpdate(ns.App.mini.frame, 20)
+        equal(ns.Core.TimerElapsed(ClassicLootLogDB, clock), 7, tab)
+        equal(ns.App.timerButton:GetText(), "Timer: OFF", tab)
+        ns.Core.RecordMobKill(ClassicLootLogDB, "paused-" .. tab, "Wolf", stamp, clock)
+        equal(ClassicLootLogDB.mobs.timed, 0, tab)
+        ns.App.timerButton.scripts.OnClick(ns.App.timerButton, "LeftButton")
+        equal(ClassicLootLogDB.timer.enabled, true, tab)
+        equal(ns.App.timerButton:GetText(), "Timer: ON", tab)
+        clock = clock + 3
+        ns.App.timerButton.scripts.OnClick(ns.App.timerButton, "LeftButton")
+        equal(ns.Core.TimerElapsed(ClassicLootLogDB, clock), 10, tab)
+        equal(ns.App.timerButton:GetText(), "Timer: OFF", tab)
+    end
+end)
+
+test("timer off command updates every tab and mini window while the main window is hidden", function()
+    for _, tab in ipairs({"loot", "commands", "group", "finance", "logs"}) do
+        resetSession()
+        ns.App.mini:Show()
+        SlashCmdList.CLASSICLOOTLOG("timer on")
+        ns.App:SetTab(tab)
+        ns.App.frame:Hide()
+        clock = clock + 4
+        SlashCmdList.CLASSICLOOTLOG("timer off")
+        equal(ClassicLootLogDB.timer.enabled, false, tab)
+        equal(ns.App.timerButton:GetText(), "Timer: OFF", tab)
+        equal(ns.App.frame:IsShown(), false, tab)
+        assert(ns.App.mini.timer:GetText():find("paused", 1, true), tab)
+        clock = clock + 15
+        ns.App.mini.frame.scripts.OnUpdate(ns.App.mini.frame, 15)
+        equal(ns.Core.TimerElapsed(ClassicLootLogDB, clock), 4, tab)
+        SlashCmdList.CLASSICLOOTLOG("timer off")
+        equal(ns.Core.TimerElapsed(ClassicLootLogDB, clock), 4, tab)
+    end
+end)
+
 print(string.format("%d WoW integration smoke tests passed", passed))

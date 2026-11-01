@@ -1,8 +1,8 @@
 # Classic Loot Log — OctoWoW
 
-**Version 1.8.0** targets **OctoWoW's WoW 1.12.1 / Lua 5.0 client** (`Interface: 11200`). It provides an English interface using the original WoW dialog background, decorative border, gold headings and standard buttons.
+**Version 1.8.1** targets **OctoWoW's WoW 1.12.1 / Lua 5.0 client** (`Interface: 11200`). It provides an English interface using the original WoW dialog background, decorative border, gold headings and standard buttons.
 
-**[Download ClassicLootLog-1.8.0-OctoWoW.zip](downloads/ClassicLootLog-1.8.0-OctoWoW.zip?raw=true)**
+**[Download ClassicLootLog-1.8.1-OctoWoW.zip](downloads/ClassicLootLog-1.8.1-OctoWoW.zip?raw=true)**
 
 ## Install or update
 
@@ -69,6 +69,8 @@ Type **`/sl`** to show or hide a small movable window containing **Mobs/hour**, 
 The received-money counter starts at zero when updating from an earlier version: old loot-window money rows cannot reliably identify how much you personally received. It persists across logout or `/reload` and resets with the session.
 
 Use `/sl show` or `/sl hide` for explicit control. Drag the panel to move it. Visibility is remembered per character. Timer controls remain `/cll timer on` and `/cll timer off`; resetting the session also resets the mini window's displayed values.
+
+The **Timer: ON/OFF** button starts or pauses the same stopwatch from every tab. Version 1.8.1 fixes its label remaining ON outside the Loot tab after pausing. `/cll timer off` also pauses it while the main window is hidden; the elapsed time and timed kill count stay frozen until resumed.
 
 ## Minimap button
 

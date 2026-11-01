@@ -30,7 +30,7 @@ assert [path.name for path in manual_files] == [
     "MinimapButton.lua", "LogsPanel.lua", "Main.lua"
 ]
 assert manual_metadata["Interface"] == "11200"
-assert manual_metadata["Version"] == "1.8.0"
+assert manual_metadata["Version"] == "1.8.1"
 assert "SellValue" in manual_metadata["OptionalDeps"].split(", ")
 assert manual_metadata["SavedVariablesPerCharacter"] == "ClassicLootLogDB"
 print("PASS launcher and manual entry points load the same version and addon files")

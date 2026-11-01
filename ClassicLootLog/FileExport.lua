@@ -86,7 +86,7 @@ function FileExport.BuildReport(db, groupModel, options)
         return formatDate(options, "%Y-%m-%d %H:%M:%S", value)
     end
     local lines = {
-        "Classic Loot Log export\t1.8.0",
+        "Classic Loot Log export\t1.8.1",
         "Logged by\t" .. cleanText(playerName(options)),
         "Exported\t" .. cleanText(dateTime(stamp)),
         "Scope\tAll currently retained records for this character, not only the visible tab.",

@@ -2,7 +2,7 @@
 ## Title: Classic Loot Log
 ## Notes: Loot tracking, finances, received loot money, saved logs, a movable minimap button and compact /sl metrics for OctoWoW.
 ## Author: Haraldprins67
-## Version: 1.8.0
+## Version: 1.8.1
 ## OptionalDeps: SellValue
 ## SavedVariablesPerCharacter: ClassicLootLogDB
 

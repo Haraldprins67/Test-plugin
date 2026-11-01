@@ -154,6 +154,7 @@ end
 function App:Refresh()
     if not self.frame then return end
     self:UpdateTabControls()
+    self:UpdateSessionStats()
     if self.tab == "commands" then self:RefreshCommands(); return end
     if self.tab == "group" then self:RefreshGroup(); return end
     if self.tab == "finance" then self:RefreshFinance(); return end
@@ -182,9 +183,7 @@ function App:Refresh()
         and string.format("Original: %d  |  DE materials: %d", stats.totalQuantity, stats.totalMaterials)
         or string.format("%d loot entries  |  DE: %d", count, stats.totalDisenchanted))
     self.empty:SetText(count == 0 and "No items in this view yet. Open a loot window to record drops." or "")
-    self.timerButton:SetText(db.timer.enabled and "Timer: ON" or "Timer: OFF")
     self.viewButton:SetText(self.view == "stats" and "Loot list" or "Item shares")
-    self:UpdateSessionStats()
     local selected
     for _, entry in ipairs(db.entries) do
         if entry.id == self.selectedEntryID then selected = entry; break end
@@ -220,6 +219,7 @@ end
 
 function App:UpdateSessionStats()
     local mobs = Core.MobStats(self.db, now())
+    self.timerButton:SetText(self.db.timer.enabled and "Timer: ON" or "Timer: OFF")
     self.timerText:SetText("Session time: " .. Core.FormatElapsed(mobs.elapsed))
     self.mobText:SetText(string.format("Mobs: %d  |  Mobs/hour: %.1f  |  While timed: %d", mobs.total, mobs.perHour, mobs.timed))
     if self.mini then self.mini:Refresh() end
@@ -325,7 +325,6 @@ function App:RefreshFinance()
     end
     self.financeChild:SetHeight(math.max(270, 245 + table.getn(summary.materialRows) * rowHeight))
     self.financeScroll:UpdateScrollChildRect()
-    self:UpdateSessionStats()
 end
 
 function App:RefreshCommands()
@@ -342,7 +341,6 @@ function App:RefreshCommands()
             row:Show()
         else row:Hide() end
     end
-    self:UpdateSessionStats()
 end
 
 local function methodLabel(entry, compact)
@@ -463,7 +461,6 @@ function App:RefreshGroup()
     self.groupDetail:SetHeight(detailHeight)
     self.groupDetailChild:SetHeight(detailHeight)
     self.groupDetailScroll:UpdateScrollChildRect()
-    self:UpdateSessionStats()
 end
 
 function App:CreateExtraTabs(frame)

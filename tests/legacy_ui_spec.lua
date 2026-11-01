@@ -795,4 +795,53 @@ test("Vanilla sale hooks confirm real income through old money and bag events", 
     merchantAction = nil
 end)
 
+test("Vanilla timer button pauses immediately in every tab and does not count paused time", function()
+    for _, tab in ipairs({"loot", "commands", "group", "finance", "logs"}) do
+        reset()
+        ns.App.frame:Show()
+        ns.App.mini:Show()
+        SlashCmdList.CLASSICLOOTLOG("timer on")
+        ns.App:SetTab(tab)
+        equal(ns.App.timerButton:GetText(), "Timer: ON")
+        clock = clock + 7
+        fire(ns.App.timerButton, "OnClick", "LeftButton")
+        equal(ClassicLootLogDB.timer.enabled, false)
+        equal(ns.App.timerButton:GetText(), "Timer: OFF")
+        equal(ns.Core.TimerElapsed(ClassicLootLogDB, clock), 7)
+        assert(string.find(ns.App.mini.timer:GetText(), "paused", 1, true))
+        tick(20)
+        equal(ns.Core.TimerElapsed(ClassicLootLogDB, clock), 7)
+        equal(ns.App.timerButton:GetText(), "Timer: OFF")
+        ns.Core.RecordMobKill(ClassicLootLogDB, "paused-" .. tab, "Wolf", stamp, clock)
+        equal(ClassicLootLogDB.mobs.timed, 0)
+        fire(ns.App.timerButton, "OnClick", "LeftButton")
+        equal(ClassicLootLogDB.timer.enabled, true)
+        equal(ns.App.timerButton:GetText(), "Timer: ON")
+        tick(3)
+        fire(ns.App.timerButton, "OnClick", "LeftButton")
+        equal(ns.Core.TimerElapsed(ClassicLootLogDB, clock), 10)
+        equal(ns.App.timerButton:GetText(), "Timer: OFF")
+    end
+end)
+
+test("Vanilla timer off command updates all tabs and the mini display while main is hidden", function()
+    for _, tab in ipairs({"loot", "commands", "group", "finance", "logs"}) do
+        reset()
+        ns.App.mini:Show()
+        SlashCmdList.CLASSICLOOTLOG("timer on")
+        ns.App:SetTab(tab)
+        ns.App.frame:Hide()
+        clock = clock + 4
+        SlashCmdList.CLASSICLOOTLOG("timer off")
+        equal(ClassicLootLogDB.timer.enabled, false)
+        equal(ns.App.timerButton:GetText(), "Timer: OFF")
+        equal(ns.App.frame:IsShown(), false)
+        assert(string.find(ns.App.mini.timer:GetText(), "paused", 1, true))
+        tick(15)
+        equal(ns.Core.TimerElapsed(ClassicLootLogDB, clock), 4)
+        SlashCmdList.CLASSICLOOTLOG("timer off")
+        equal(ns.Core.TimerElapsed(ClassicLootLogDB, clock), 4)
+    end
+end)
+
 print(passed .. " legacy UI tests passed")
